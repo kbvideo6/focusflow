@@ -6,7 +6,7 @@ import db, { initDatabase } from './db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const csvPath = path.resolve(__dirname, '../../../EES_2nd_Year_2nd_Semester_Timetable.csv');
+const csvPath = process.env.TIMETABLE_CSV || path.resolve(__dirname, '../../../EES_2nd_Year_2nd_Semester_Timetable.csv');
 
 export async function runSeed() {
   console.log('Seeding Timetable data from CSV...');

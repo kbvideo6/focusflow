@@ -1,16 +1,19 @@
 services:
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: focusflow-backend
     restart: unless-stopped
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       PORT: 5000
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in the server .env file}
+      JWT_SECRET: ${JWT_SECRET:-replace-this-secret-before-production}
+      DB_PATH: /app/data/database.sqlite
+      TIMETABLE_CSV: /app/EES_2nd_Year_2nd_Semester_Timetable.csv
     volumes:
-      - ./backend/database.sqlite:/app/database.sqlite
+      - focusflow_db:/app/data
 
   frontend:
     build:
@@ -22,4 +25,7 @@ services:
       - backend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:80"
+
+volumes:
+  focusflow_db:
