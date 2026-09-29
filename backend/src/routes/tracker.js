@@ -2,6 +2,7 @@ import express from 'express';
 import db from '../config/db.js';
 import { verifyToken } from '../middleware/auth.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
+import { parseTimetableCsv } from '../utils/timetable.js';
 
 const router = express.Router();
 
@@ -58,59 +59,25 @@ router.post('/timetable/import', verifyToken, async (req, res) => {
   }
 
   try {
-    const lines = csvText.split('\n').map(line => line.trim()).filter(Boolean);
-    if (lines.length === 0) {
+    const entries = parseTimetableCsv(csvText);
+    if (entries.length === 0) {
       return res.status(400).json({ error: 'Empty CSV content.' });
     }
 
     // Delete old timetable for this user
     await runQuery('DELETE FROM timetable WHERE user_id = ?', [req.userId]);
 
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-
-    for (let i = 1; i < lines.length; i++) {
-      const cells = lines[i].split(',').map(c => c.trim());
-      if (cells.length < 2) continue;
-
-      const timeSlot = cells[0];
-      if (timeSlot.toLowerCase().includes('break') || cells[1].toLowerCase().includes('break')) {
-        continue;
-      }
-
-      for (let dayIdx = 0; dayIdx < days.length; dayIdx++) {
-        const dayName = days[dayIdx];
-        const cellValue = cells[dayIdx + 1];
-
-        if (!cellValue || cellValue.trim() === '') continue;
-        if (cellValue.toUpperCase().includes('BREAK')) continue;
-
-        let subject = cellValue;
-        let location = '';
-
-        if (subject.includes('(@')) {
-          const parts = subject.split('(@');
-          subject = parts[0].trim();
-          location = parts[1].replace(')', '').trim();
-        } else if (subject.includes('@')) {
-          const parts = subject.split('@');
-          subject = parts[0].trim();
-          location = parts[1].trim();
-        } else if (subject.includes('(')) {
-          const parts = subject.split('(');
-          subject = parts[0].trim();
-          location = parts[1].replace(')', '').trim();
-        }
-
+    for (const entry of entries) {
         await runQuery(
           'INSERT INTO timetable (user_id, day_of_week, time_slot, subject_name, location) VALUES (?, ?, ?, ?, ?)',
-          [req.userId, dayName, timeSlot, subject, location]
+          [req.userId, entry.day, entry.timeSlot, entry.subject, entry.location]
         );
 
         // Auto-create unique subject in encrypted dashboard if it doesn't exist
         const subjects = await allQuery('SELECT name FROM subjects WHERE user_id = ?', [req.userId]);
-        const exists = subjects.some(row => decrypt(row.name, req.userKey).toLowerCase() === subject.toLowerCase());
+        const exists = subjects.some(row => decrypt(row.name, req.userKey).toLowerCase() === entry.subject.toLowerCase());
         if (!exists) {
-          const encName = encrypt(subject, req.userKey);
+          const encName = encrypt(entry.subject, req.userKey);
           const encTarget = encrypt(80, req.userKey);
           const encTargetRequired = encrypt(1, req.userKey);
           const encPriority = encrypt('Medium', req.userKey);
@@ -122,7 +89,6 @@ router.post('/timetable/import', verifyToken, async (req, res) => {
             [req.userId, encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade]
           );
         }
-      }
     }
 
     res.json({ message: 'Timetable imported successfully.' });
