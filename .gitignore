@@ -1,0 +1,16 @@
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+backend/database.sqlite
+backend/.env
+frontend/.env
+frontend/dist/
+.vite/
+.DS_Store
+npm-debug.log*
+graphify-out/
+npm-cache/
+backend/npm-cache/
+stitch_unified_personal_dashboard_tracker/
+.agents/
+.env
