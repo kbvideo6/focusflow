@@ -6,6 +6,7 @@
     "install-all": "npm install && npm install --prefix backend && npm install --prefix frontend",
     "dev:backend": "npm run start --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
+    "db:activity": "npm run db:activity --prefix backend",
     "start": "concurrently --kill-others \"npm run start --prefix backend\" \"npm run dev --prefix frontend\""
   },
   "dependencies": {

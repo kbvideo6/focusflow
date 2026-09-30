@@ -6,6 +6,7 @@ interface User {
   monthly_budget_limit: number;
   daily_budget_limit: number;
   attendance_target_pct: number;
+  is_admin?: boolean;
 }
 
 interface AuthContextType {
@@ -58,10 +59,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   const login = async (username: string, password: string) => {
+    const cleanUsername = username.trim();
     const res = await fetch(`${apiUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username: cleanUsername, password })
     });
 
     const data = await res.json();
@@ -75,10 +77,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signup = async (username: string, password: string) => {
+    const cleanUsername = username.trim();
     const res = await fetch(`${apiUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username: cleanUsername, password })
     });
 
     const data = await res.json();

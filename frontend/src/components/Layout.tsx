@@ -138,6 +138,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
     { name: 'Gym', path: '/gym', icon: 'fitness_center' },
     { name: 'Skincare', path: '/skincare', icon: 'face_6' },
     { name: 'Projects', path: '/projects', icon: 'account_tree' },
+    ...(user?.is_admin ? [{ name: 'Developer', path: '/developer', icon: 'admin_panel_settings' }] : []),
     { name: 'Settings', path: '/settings', icon: 'settings' }
   ];
 

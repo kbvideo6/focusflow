@@ -2,6 +2,7 @@ import sqlite3 from 'sqlite3';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { runAuthMigration } from '../utils/migration.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,6 +36,7 @@ export async function initDatabase() {
       monthly_budget_limit REAL DEFAULT 30000.0,
       daily_budget_limit REAL DEFAULT 1000.0,
       attendance_target_pct REAL DEFAULT 80.0,
+      is_admin INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -226,6 +228,13 @@ export async function initDatabase() {
     await db.runAsync('ALTER TABLE timetable ADD COLUMN user_id INTEGER');
   } catch (err) {
     // Column already exists
+  }
+
+  // Automatic legacy auth and credentials migration
+  try {
+    await runAuthMigration();
+  } catch (err) {
+    console.error('Failed to run auth migration:', err);
   }
 
   console.log('Database tables verified/created successfully.');

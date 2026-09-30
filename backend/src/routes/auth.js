@@ -5,15 +5,20 @@ import crypto from 'crypto';
 import db from '../config/db.js';
 import { JWT_SECRET, verifyToken } from '../middleware/auth.js';
 import {
-  encryptUsername,
-  decryptUsername,
-  encryptWithGlobalKey,
-  decryptWithGlobalKey,
-  encrypt,
-  decrypt
-} from '../utils/crypto.js';
+  tryDecryptUsername,
+  tryDecryptPasswordHash,
+  tryDecryptNumber
+} from '../utils/migration.js';
+import { encryptUsername } from '../utils/crypto.js';
 
 const router = express.Router();
+
+const getAdminNames = () => {
+  return (process.env.ADMIN_USERNAMES || 'nisal,nisal7410,admin')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+};
 
 // Signup endpoint
 router.post('/signup', async (req, res) => {
@@ -23,16 +28,43 @@ router.post('/signup', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required.' });
   }
 
+  const cleanUsername = String(username).trim();
+  if (cleanUsername.length < 2) {
+    return res.status(400).json({ error: 'Username must be at least 2 characters long.' });
+  }
+
   try {
+    // Check if user already exists (case-insensitive)
+    const existing = await new Promise((resolve, reject) => {
+      db.get('SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)', [cleanUsername], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (existing) {
+      return res.status(400).json({ error: 'Username already exists.' });
+    }
+
+    // Check user count to grant admin to the first user
+    const userCountRow = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM users', (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    const isFirstUser = !userCountRow || userCountRow.count === 0;
+    const adminNames = getAdminNames();
+    const isAdmin = (isFirstUser || adminNames.includes(cleanUsername.toLowerCase())) ? 1 : 0;
+
+    // Secure standard bcrypt hash (never fragile AES wrapper)
     const passwordHash = await bcrypt.hash(password, 10);
-    // Encrypt password hash using the global key
-    const encPasswordHash = encryptWithGlobalKey(passwordHash);
-    // Encrypt username deterministically using the global key
-    const encUsername = encryptUsername(username);
     
     db.run(
-      'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-      [encUsername, encPasswordHash],
+      `INSERT INTO users (username, password_hash, monthly_budget_limit, daily_budget_limit, attendance_target_pct, is_admin) 
+       VALUES (?, ?, 30000, 1000, 80, ?)`,
+      [cleanUsername, passwordHash, isAdmin],
       function (err) {
         if (err) {
           if (err.message.includes('UNIQUE constraint failed')) {
@@ -42,19 +74,23 @@ router.post('/signup', async (req, res) => {
         }
 
         const userId = this.lastID;
-        // Derive userKey from raw password
         const userKey = crypto.createHash('sha256').update(password).digest('hex');
-        const token = jwt.sign({ id: userId, userKey }, JWT_SECRET, { expiresIn: '24h' });
+        const token = jwt.sign(
+          { id: userId, username: cleanUsername, isAdmin: Boolean(isAdmin), userKey },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
 
         res.status(201).json({
           message: 'User created successfully.',
           token,
           user: {
             id: userId,
-            username, // return plain text to UI
+            username: cleanUsername,
             monthly_budget_limit: 30000,
             daily_budget_limit: 1000,
-            attendance_target_pct: 80
+            attendance_target_pct: 80,
+            is_admin: Boolean(isAdmin)
           }
         });
       }
@@ -65,79 +101,116 @@ router.post('/signup', async (req, res) => {
 });
 
 // Login endpoint
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required.' });
   }
 
-  const encUsername = encryptUsername(username);
+  const cleanUsername = String(username).trim();
+  const legacyEncryptedVariant = encryptUsername(cleanUsername);
 
-  // We check for both the encrypted username AND plain username (for backward compatibility / migration)
-  db.get('SELECT * FROM users WHERE username = ? OR username = ?', [encUsername, username], async (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-
-    if (!user) {
-      return res.status(400).json({ error: 'Invalid username or password.' });
-    }
-
-    // Decrypt password hash if it is encrypted, otherwise use raw password_hash
-    let storedHash = user.password_hash;
-    if (storedHash.includes(':')) {
-      storedHash = decryptWithGlobalKey(storedHash);
-    }
-
-    const validPassword = await bcrypt.compare(password, storedHash);
-    if (!validPassword) {
-      return res.status(400).json({ error: 'Invalid username or password.' });
-    }
-
-    // Migration logic: if username in database is still plaintext, update it and the password hash to be encrypted
-    if (user.username === username) {
-      const encPasswordHash = encryptWithGlobalKey(user.password_hash);
-      db.run(
-        'UPDATE users SET username = ?, password_hash = ? WHERE id = ?',
-        [encUsername, encPasswordHash, user.id],
-        (updateErr) => {
-          if (updateErr) {
-            console.error('Failed to migrate user to encrypted credentials:', updateErr);
-          } else {
-            console.log(`Migrated user ${username} to encrypted credentials.`);
-          }
+  try {
+    // 1. Try finding user case-insensitively, or by legacy encrypted variant
+    db.get(
+      'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(?) OR username = ? OR username = ?',
+      [cleanUsername, cleanUsername, legacyEncryptedVariant],
+      async (err, user) => {
+        if (err) {
+          return res.status(500).json({ error: err.message });
         }
-      );
-    }
 
-    // Derive userKey from raw password
-    const userKey = crypto.createHash('sha256').update(password).digest('hex');
-    const token = jwt.sign({ id: user.id, userKey }, JWT_SECRET, { expiresIn: '24h' });
+        // 2. If not found by direct SQL, scan for any legacy encrypted username
+        if (!user) {
+          const allUsers = await new Promise((resolve) => {
+            db.all('SELECT * FROM users', [], (err, rows) => resolve(rows || []));
+          });
 
-    // Decrypt user settings limits if they are encrypted
-    const monthlyLimit = decrypt(user.monthly_budget_limit, userKey, 'number');
-    const dailyLimit = decrypt(user.daily_budget_limit, userKey, 'number');
-    const attendanceTarget = decrypt(user.attendance_target_pct, userKey, 'number');
+          user = allUsers.find(u => {
+            const dec = tryDecryptUsername(u.username);
+            return dec && dec.toLowerCase() === cleanUsername.toLowerCase();
+          });
+        }
 
-    res.json({
-      message: 'Login successful.',
-      token,
-      user: {
-        id: user.id,
-        username,
-        monthly_budget_limit: monthlyLimit,
-        daily_budget_limit: dailyLimit,
-        attendance_target_pct: attendanceTarget
+        if (!user) {
+          return res.status(400).json({ error: 'Invalid username or password.' });
+        }
+
+        // 3. Resolve password hash (pure bcrypt or legacy encrypted)
+        let storedHash = user.password_hash;
+        if (storedHash && storedHash.includes(':')) {
+          storedHash = tryDecryptPasswordHash(storedHash);
+        }
+
+        const validPassword = await bcrypt.compare(password, storedHash);
+        if (!validPassword) {
+          return res.status(400).json({ error: 'Invalid username or password.' });
+        }
+
+        // 4. Resolve limits
+        const monthlyLimit = tryDecryptNumber(user.monthly_budget_limit, 30000);
+        const dailyLimit = tryDecryptNumber(user.daily_budget_limit, 1000);
+        const attendanceTarget = tryDecryptNumber(user.attendance_target_pct, 80);
+
+        // 5. Resolve Admin Status
+        const adminNames = getAdminNames();
+        const isAdmin = Boolean(
+          user.is_admin === 1 || 
+          user.id === 1 || 
+          adminNames.includes(cleanUsername.toLowerCase())
+        );
+
+        // 6. Transparently upgrade/migrate row if it was stored with legacy encrypted format
+        const needsRowUpgrade = 
+          user.username !== cleanUsername || 
+          user.password_hash !== storedHash ||
+          user.monthly_budget_limit !== monthlyLimit ||
+          user.is_admin !== (isAdmin ? 1 : 0);
+
+        if (needsRowUpgrade) {
+          db.run(
+            `UPDATE users 
+             SET username = ?, password_hash = ?, monthly_budget_limit = ?, daily_budget_limit = ?, attendance_target_pct = ?, is_admin = ? 
+             WHERE id = ?`,
+            [cleanUsername, storedHash, monthlyLimit, dailyLimit, attendanceTarget, isAdmin ? 1 : 0, user.id],
+            (updateErr) => {
+              if (updateErr) console.error('Auto-upgrade user error:', updateErr);
+            }
+          );
+        }
+
+        // 7. Issue session token (30 days validity for smooth UX)
+        const userKey = crypto.createHash('sha256').update(password).digest('hex');
+        const token = jwt.sign(
+          { id: user.id, username: cleanUsername, isAdmin, userKey },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+
+        res.json({
+          message: 'Login successful.',
+          token,
+          user: {
+            id: user.id,
+            username: cleanUsername,
+            monthly_budget_limit: monthlyLimit,
+            daily_budget_limit: dailyLimit,
+            attendance_target_pct: attendanceTarget,
+            is_admin: isAdmin
+          }
+        });
       }
-    });
-  });
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get profile
 router.get('/me', verifyToken, (req, res) => {
   db.get(
-    'SELECT id, username, monthly_budget_limit, daily_budget_limit, attendance_target_pct FROM users WHERE id = ?',
+    'SELECT id, username, monthly_budget_limit, daily_budget_limit, attendance_target_pct, is_admin FROM users WHERE id = ?',
     [req.userId],
     (err, user) => {
       if (err) {
@@ -146,16 +219,27 @@ router.get('/me', verifyToken, (req, res) => {
       if (!user) {
         return res.status(404).json({ error: 'User not found.' });
       }
-      
-      const decryptedUser = {
+
+      const plainUsername = tryDecryptUsername(user.username);
+      const monthlyLimit = tryDecryptNumber(user.monthly_budget_limit, 30000);
+      const dailyLimit = tryDecryptNumber(user.daily_budget_limit, 1000);
+      const attendanceTarget = tryDecryptNumber(user.attendance_target_pct, 80);
+
+      const adminNames = getAdminNames();
+      const isAdmin = Boolean(
+        user.is_admin === 1 || 
+        user.id === 1 || 
+        adminNames.includes((plainUsername || '').toLowerCase())
+      );
+
+      res.json({
         id: user.id,
-        username: decryptUsername(user.username),
-        monthly_budget_limit: decrypt(user.monthly_budget_limit, req.userKey, 'number'),
-        daily_budget_limit: decrypt(user.daily_budget_limit, req.userKey, 'number'),
-        attendance_target_pct: decrypt(user.attendance_target_pct, req.userKey, 'number'),
-      };
-      
-      res.json(decryptedUser);
+        username: plainUsername,
+        monthly_budget_limit: monthlyLimit,
+        daily_budget_limit: dailyLimit,
+        attendance_target_pct: attendanceTarget,
+        is_admin: isAdmin
+      });
     }
   );
 });
@@ -164,22 +248,26 @@ router.get('/me', verifyToken, (req, res) => {
 router.put('/settings', verifyToken, (req, res) => {
   const { monthly_budget_limit, daily_budget_limit, attendance_target_pct } = req.body;
 
-  const encMonthlyLimit = encrypt(monthly_budget_limit, req.userKey);
-  const encDailyLimit = encrypt(daily_budget_limit, req.userKey);
-  const encAttendanceTarget = encrypt(attendance_target_pct, req.userKey);
+  const monthly = Number(monthly_budget_limit) || 30000;
+  const daily = Number(daily_budget_limit) || 1000;
+  const attendance = Number(attendance_target_pct) || 80;
 
   db.run(
     `UPDATE users 
      SET monthly_budget_limit = ?, daily_budget_limit = ?, attendance_target_pct = ? 
      WHERE id = ?`,
-    [encMonthlyLimit, encDailyLimit, encAttendanceTarget, req.userId],
+    [monthly, daily, attendance, req.userId],
     function (err) {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
       res.json({
         message: 'Settings updated successfully.',
-        settings: { monthly_budget_limit, daily_budget_limit, attendance_target_pct }
+        settings: {
+          monthly_budget_limit: monthly,
+          daily_budget_limit: daily,
+          attendance_target_pct: attendance
+        }
       });
     }
   );

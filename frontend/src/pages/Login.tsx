@@ -19,16 +19,17 @@ export const Login: React.FC = () => {
     e.preventDefault();
     setError('');
     
-    if (!username || !password) {
+    const cleanUsername = username.trim();
+    if (!cleanUsername || !password) {
       setError('Please fill in all fields.');
       return;
     }
 
     try {
       if (isLogin) {
-        await login(username, password);
+        await login(cleanUsername, password);
       } else {
-        await signup(username, password);
+        await signup(cleanUsername, password);
         setShowSetup(true); // Show configuration options for new users
       }
     } catch (err: any) {
@@ -158,6 +159,9 @@ export const Login: React.FC = () => {
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-[#f8f9ff] border border-outline-variant rounded-lg p-3 text-body-md focus:ring-2 focus:ring-primary focus:outline-none"
                 placeholder="Enter username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 required
               />
             </div>

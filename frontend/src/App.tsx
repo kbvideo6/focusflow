@@ -10,6 +10,7 @@ import { Gym } from './pages/Gym';
 import { Skincare } from './pages/Skincare';
 import { Projects } from './pages/Projects';
 import { Settings } from './pages/Settings';
+import { Developer } from './pages/Developer';
 import './index.css';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -63,6 +64,7 @@ export const AppContent: React.FC = () => {
         <Route path="/skincare" element={<ProtectedRoute><Skincare /></ProtectedRoute>} />
         <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/developer" element={<ProtectedRoute><Developer /></ProtectedRoute>} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

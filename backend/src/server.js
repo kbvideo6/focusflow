@@ -5,6 +5,7 @@ import db, { initDatabase } from './config/db.js';
 import { runSeed } from './config/seed.js';
 import authRoutes from './routes/auth.js';
 import trackerRoutes from './routes/tracker.js';
+import developerRoutes from './routes/developer.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -12,7 +13,7 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: '*', // Allow all origins for local development/testing
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-dev-key']
 }));
 
 app.use(express.json());
@@ -20,6 +21,7 @@ app.use(express.json());
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/tracker', trackerRoutes);
+app.use('/api/developer', developerRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
