@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
-import { usePushNotifications } from '../hooks/usePushNotifications';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,7 +24,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
     dismissPermissionBanner
   } = useNotifications();
 
-  const { pushStatus, subscribe, isSupported: isPushSupported } = usePushNotifications();
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showMobileDropdown, setShowMobileDropdown] = useState(false);
@@ -168,7 +166,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
     <div className="bg-background text-on-background font-body-md text-body-md antialiased min-h-screen flex flex-col md:flex-row">
 
       {/* Push Notification Permission Banner (slides in after login like Slack/Gmail) */}
-      {showPermissionBanner && isPushSupported && pushStatus !== 'subscribed' && (
+      {showPermissionBanner && permission === 'default' && (
         <div className="fixed top-0 left-0 right-0 z-[80] animate-[slideDown_0.4s_ease-out]">
           <div className="bg-primary text-on-primary px-4 py-3 flex items-center justify-between gap-4 shadow-lg">
             <div className="flex items-center gap-3">
@@ -180,7 +178,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={async () => { await requestPermission(); await subscribe(); }}
+                onClick={requestPermission}
                 className="px-3 py-1.5 bg-white text-primary text-xs font-bold rounded-lg hover:bg-white/90 transition-colors whitespace-nowrap"
               >
                 Enable Notifications
