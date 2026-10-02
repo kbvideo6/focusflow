@@ -52,10 +52,18 @@ export async function initDatabase() {
       priority TEXT DEFAULT 'Medium', -- 'High', 'Medium', 'Low'
       effort_needed TEXT DEFAULT 'Medium', -- 'High', 'Medium', 'Low'
       projected_grade TEXT DEFAULT 'A',
+      current_marks REAL DEFAULT 0.0,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(user_id, name)
     )
   `);
+
+  // Migration: Ensure current_marks column exists in subjects table
+  try {
+    await db.runAsync('ALTER TABLE subjects ADD COLUMN current_marks REAL DEFAULT 0.0');
+  } catch (err) {
+    // Column already exists
+  }
 
   // Attendance Logs table
   await db.runAsync(`
@@ -115,9 +123,17 @@ export async function initDatabase() {
       category TEXT NOT NULL,
       description TEXT,
       date TEXT NOT NULL, -- YYYY-MM-DD
+      type TEXT DEFAULT 'expense', -- 'expense' or 'income'
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
+  // Migration: Ensure type column exists in transactions table
+  try {
+    await db.runAsync("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'expense'");
+  } catch (err) {
+    // Column already exists
+  }
 
   // Gym Daily Health Logs table
   await db.runAsync(`
@@ -229,6 +245,66 @@ export async function initDatabase() {
   } catch (err) {
     // Column already exists
   }
+
+  // Migration: Ensure daily_calorie_target exists in users table
+  try {
+    await db.runAsync('ALTER TABLE users ADD COLUMN daily_calorie_target REAL DEFAULT 2000.0');
+  } catch (err) {
+    // Column already exists
+  }
+
+  // Calorie Logs table (Single daily total + optional multi-meal breakdowns)
+  await db.runAsync(`
+    CREATE TABLE IF NOT EXISTS calorie_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      date TEXT NOT NULL, -- YYYY-MM-DD
+      total_calories REAL NOT NULL DEFAULT 0.0,
+      calorie_target REAL DEFAULT 2000.0,
+      meals TEXT, -- JSON string array of meal entries: [{id, name, calories, time, notes}]
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, date)
+    )
+  `);
+
+  // Addiction Habits table (Defines habits being monitored)
+  await db.runAsync(`
+    CREATE TABLE IF NOT EXISTS addiction_habits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT CHECK(category IN ('substance', 'digital', 'behavioral', 'custom')) NOT NULL,
+      unit TEXT NOT NULL, -- 'cigarettes', 'minutes', 'episodes', etc.
+      daily_threshold REAL DEFAULT 0.0,
+      cost_per_unit REAL DEFAULT 0.0,
+      color TEXT DEFAULT '#4f46e5',
+      icon TEXT DEFAULT 'smoke_free',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Addiction Daily Logs table
+  await db.runAsync(`
+    CREATE TABLE IF NOT EXISTS addiction_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      habit_id INTEGER NOT NULL,
+      date TEXT NOT NULL, -- YYYY-MM-DD
+      quantity REAL NOT NULL DEFAULT 0.0,
+      trigger_context TEXT,
+      craving_intensity INTEGER DEFAULT 3, -- 1-5 scale
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (habit_id) REFERENCES addiction_habits(id) ON DELETE CASCADE,
+      UNIQUE(user_id, habit_id, date)
+    )
+  `);
 
   // Automatic legacy auth and credentials migration
   try {

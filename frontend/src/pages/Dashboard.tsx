@@ -20,7 +20,7 @@ interface FinanceSummary {
 }
 
 export const Dashboard: React.FC = () => {
-  const { token, apiUrl } = useAuth();
+  const { token, apiUrl, user } = useAuth();
   
   const [todayClasses, setTodayClasses] = useState<TimetableItem[]>([]);
   const [finance, setFinance] = useState<FinanceSummary | null>(null);
@@ -65,26 +65,27 @@ export const Dashboard: React.FC = () => {
       });
       if (finRes.ok) setFinance(await finRes.json());
 
-      // 4. Fetch today's gym log
-      const gymRes = await fetch(`${apiUrl}/tracker/gym/daily?date=${dateStr}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (gymRes.ok) {
-        const gymData = await gymRes.json();
-        setGymLogged(!!gymData.visited);
-        setWaterIntake(gymData.water_intake_ml || 0);
-        setSleepHours(gymData.sleep_hours || 0);
-        setWorkoutSummary(gymData.workout_summary || '');
-      }
+      // 4. Fetch gym and skincare only if user is admin
+      if (user?.is_admin) {
+        const gymRes = await fetch(`${apiUrl}/tracker/gym/daily?date=${dateStr}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (gymRes.ok) {
+          const gymData = await gymRes.json();
+          setGymLogged(!!gymData.visited);
+          setWaterIntake(gymData.water_intake_ml || 0);
+          setSleepHours(gymData.sleep_hours || 0);
+          setWorkoutSummary(gymData.workout_summary || '');
+        }
 
-      // 5. Fetch skincare logs
-      const skinRes = await fetch(`${apiUrl}/tracker/skincare/daily?date=${dateStr}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (skinRes.ok) {
-        const skinData = await skinRes.json();
-        setSkincareAM(skinData.morning?.completed_items?.length || 0);
-        setSkincarePM(skinData.night?.completed_items?.length || 0);
+        const skinRes = await fetch(`${apiUrl}/tracker/skincare/daily?date=${dateStr}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (skinRes.ok) {
+          const skinData = await skinRes.json();
+          setSkincareAM(skinData.morning?.completed_items?.length || 0);
+          setSkincarePM(skinData.night?.completed_items?.length || 0);
+        }
       }
 
       // 6. Fetch recent attendance logs to see what has been logged today
@@ -250,7 +251,7 @@ export const Dashboard: React.FC = () => {
     <Layout title="Dashboard">
       <div className="space-y-gutter">
         {/* Top Metric Cards Panel */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+        <section className={`grid grid-cols-1 ${user?.is_admin ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-gutter`}>
           {/* Attendance Overview Card */}
           <div className="bg-white rounded-xl border border-outline-variant/50 shadow-sm p-6 hover:shadow-md transition-shadow group flex flex-col justify-between">
             <div className="flex justify-between items-start mb-4">
@@ -295,52 +296,54 @@ export const Dashboard: React.FC = () => {
             </p>
           </div>
 
-          {/* Quick Gym / Health Card */}
-          <div className="bg-white rounded-xl border border-outline-variant/50 shadow-sm p-6 hover:shadow-md transition-shadow group flex flex-col justify-between">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-2 text-primary font-medium">
-                <span className="material-symbols-outlined">fitness_center</span>
-                <span className="text-label-sm font-label-sm uppercase tracking-wider">Health Daily</span>
+          {/* Quick Gym / Health Card (Admin Only) */}
+          {user?.is_admin && (
+            <div className="bg-white rounded-xl border border-outline-variant/50 shadow-sm p-6 hover:shadow-md transition-shadow group flex flex-col justify-between">
+              <div className="flex justify-between items-start mb-4">
+                <div className="flex items-center gap-2 text-primary font-medium">
+                  <span className="material-symbols-outlined">fitness_center</span>
+                  <span className="text-label-sm font-label-sm uppercase tracking-wider">Health & Habits</span>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-stat-value font-stat-value text-on-surface">Gym Checked In</p>
-                <p className="text-label-sm font-label-sm text-outline">{gymLogged ? 'Completed session' : 'Rest day / Pending'}</p>
-              </div>
-              <button
-                onClick={() => handleGymCheckIn(!gymLogged)}
-                className={`w-12 h-6 rounded-full relative transition-colors shadow-inner flex items-center ${
-                  gymLogged ? 'bg-secondary' : 'bg-outline-variant'
-                }`}
-              >
-                <span className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform absolute ${
-                  gymLogged ? 'right-1' : 'left-1'
-                }`}></span>
-              </button>
-            </div>
-            <div className="pt-4 border-t border-outline-variant/30 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-stat-value font-stat-value text-on-surface">Gym Checked In</p>
+                  <p className="text-label-sm font-label-sm text-outline">{gymLogged ? 'Completed session' : 'Rest day / Pending'}</p>
+                </div>
                 <button
-                  type="button"
-                  onClick={handleIncrementWater}
-                  className="flex items-center gap-2 text-on-surface-variant hover:text-secondary group/btn"
+                  onClick={() => handleGymCheckIn(!gymLogged)}
+                  className={`w-12 h-6 rounded-full relative transition-colors shadow-inner flex items-center ${
+                    gymLogged ? 'bg-secondary' : 'bg-outline-variant'
+                  }`}
                 >
-                  <span className="material-symbols-outlined text-secondary group-hover/btn:scale-110 transition-transform" style={{ fontSize: '18px' }}>water_drop</span>
-                  <span className="text-body-md font-body-md font-medium">{(waterIntake / 1000).toFixed(2)}L Water</span>
+                  <span className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform absolute ${
+                    gymLogged ? 'right-1' : 'left-1'
+                  }`}></span>
                 </button>
-                <div className="text-data-tabular font-data-tabular text-outline">Target: 3.0L</div>
               </div>
-              <div className="flex items-center justify-between text-xs text-outline pt-2 border-t border-outline-variant/10">
-                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-primary text-[14px]">face_6</span> Skincare AM</span>
-                <span className="font-bold">{skincareAM} done</span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-outline">
-                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-primary text-[14px]">dark_mode</span> Skincare PM</span>
-                <span className="font-bold">{skincarePM} done</span>
+              <div className="pt-4 border-t border-outline-variant/30 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={handleIncrementWater}
+                    className="flex items-center gap-2 text-on-surface-variant hover:text-secondary group/btn"
+                  >
+                    <span className="material-symbols-outlined text-secondary group-hover/btn:scale-110 transition-transform" style={{ fontSize: '18px' }}>water_drop</span>
+                    <span className="text-body-md font-body-md font-medium">{(waterIntake / 1000).toFixed(2)}L Water</span>
+                  </button>
+                  <div className="text-data-tabular font-data-tabular text-outline">Target: 3.0L</div>
+                </div>
+                <div className="flex items-center justify-between text-xs text-outline pt-2 border-t border-outline-variant/10">
+                  <span className="flex items-center gap-1"><span className="material-symbols-outlined text-primary text-[14px]">face_6</span> Skincare AM</span>
+                  <span className="font-bold">{skincareAM} done</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-outline">
+                  <span className="flex items-center gap-1"><span className="material-symbols-outlined text-primary text-[14px]">dark_mode</span> Skincare PM</span>
+                  <span className="font-bold">{skincarePM} done</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </section>
 
         {/* Dashboard Mid Row: Classes timetable & Pomodoro */}

@@ -197,6 +197,7 @@ router.post('/login', async (req, res) => {
             monthly_budget_limit: monthlyLimit,
             daily_budget_limit: dailyLimit,
             attendance_target_pct: attendanceTarget,
+            daily_calorie_target: tryDecryptNumber(user.daily_calorie_target, 2000),
             is_admin: isAdmin
           }
         });
@@ -210,7 +211,7 @@ router.post('/login', async (req, res) => {
 // Get profile
 router.get('/me', verifyToken, (req, res) => {
   db.get(
-    'SELECT id, username, monthly_budget_limit, daily_budget_limit, attendance_target_pct, is_admin FROM users WHERE id = ?',
+    'SELECT id, username, monthly_budget_limit, daily_budget_limit, attendance_target_pct, daily_calorie_target, is_admin FROM users WHERE id = ?',
     [req.userId],
     (err, user) => {
       if (err) {
@@ -224,6 +225,7 @@ router.get('/me', verifyToken, (req, res) => {
       const monthlyLimit = tryDecryptNumber(user.monthly_budget_limit, 30000);
       const dailyLimit = tryDecryptNumber(user.daily_budget_limit, 1000);
       const attendanceTarget = tryDecryptNumber(user.attendance_target_pct, 80);
+      const calorieTarget = tryDecryptNumber(user.daily_calorie_target, 2000);
 
       const adminNames = getAdminNames();
       const isAdmin = Boolean(
@@ -238,6 +240,7 @@ router.get('/me', verifyToken, (req, res) => {
         monthly_budget_limit: monthlyLimit,
         daily_budget_limit: dailyLimit,
         attendance_target_pct: attendanceTarget,
+        daily_calorie_target: calorieTarget,
         is_admin: isAdmin
       });
     }
@@ -246,17 +249,18 @@ router.get('/me', verifyToken, (req, res) => {
 
 // Update settings
 router.put('/settings', verifyToken, (req, res) => {
-  const { monthly_budget_limit, daily_budget_limit, attendance_target_pct } = req.body;
+  const { monthly_budget_limit, daily_budget_limit, attendance_target_pct, daily_calorie_target } = req.body;
 
   const monthly = Number(monthly_budget_limit) || 30000;
   const daily = Number(daily_budget_limit) || 1000;
   const attendance = Number(attendance_target_pct) || 80;
+  const calorie = Number(daily_calorie_target) || 2000;
 
   db.run(
     `UPDATE users 
-     SET monthly_budget_limit = ?, daily_budget_limit = ?, attendance_target_pct = ? 
+     SET monthly_budget_limit = ?, daily_budget_limit = ?, attendance_target_pct = ?, daily_calorie_target = ? 
      WHERE id = ?`,
-    [monthly, daily, attendance, req.userId],
+    [monthly, daily, attendance, calorie, req.userId],
     function (err) {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -266,7 +270,8 @@ router.put('/settings', verifyToken, (req, res) => {
         settings: {
           monthly_budget_limit: monthly,
           daily_budget_limit: daily,
-          attendance_target_pct: attendance
+          attendance_target_pct: attendance,
+          daily_calorie_target: calorie
         }
       });
     }

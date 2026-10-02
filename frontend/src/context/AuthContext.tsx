@@ -6,6 +6,7 @@ interface User {
   monthly_budget_limit: number;
   daily_budget_limit: number;
   attendance_target_pct: number;
+  daily_calorie_target?: number;
   is_admin?: boolean;
 }
 
@@ -16,7 +17,7 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   signup: (username: string, password: string) => Promise<void>;
   logout: () => void;
-  updateSettings: (monthly: number, daily: number, attendance: number) => Promise<void>;
+  updateSettings: (monthly: number, daily: number, attendance: number, dailyCalorie?: number) => Promise<void>;
   apiUrl: string;
 }
 
@@ -100,8 +101,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  const updateSettings = async (monthly: number, daily: number, attendance: number) => {
+  const updateSettings = async (monthly: number, daily: number, attendance: number, dailyCalorie?: number) => {
     if (!token) return;
+    const calorieVal = dailyCalorie !== undefined ? dailyCalorie : (user?.daily_calorie_target || 2000);
     const res = await fetch(`${apiUrl}/auth/settings`, {
       method: 'PUT',
       headers: {
@@ -111,7 +113,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       body: JSON.stringify({
         monthly_budget_limit: monthly,
         daily_budget_limit: daily,
-        attendance_target_pct: attendance
+        attendance_target_pct: attendance,
+        daily_calorie_target: calorieVal
       })
     });
 
@@ -124,7 +127,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...prev,
       monthly_budget_limit: monthly,
       daily_budget_limit: daily,
-      attendance_target_pct: attendance
+      attendance_target_pct: attendance,
+      daily_calorie_target: calorieVal
     } : null);
   };
 

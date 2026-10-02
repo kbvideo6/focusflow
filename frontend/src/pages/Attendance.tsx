@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Layout } from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 
@@ -10,6 +10,7 @@ interface Subject {
   priority: string;
   effort_needed: string;
   projected_grade: string;
+  current_marks?: number;
   present_count: number;
   absent_count: number;
   medical_count: number;
@@ -46,8 +47,15 @@ export const Attendance: React.FC = () => {
   const [newSubPriority, setNewSubPriority] = useState('Medium');
   const [newSubEffort, setNewSubEffort] = useState('Medium');
   const [newSubGrade, setNewSubGrade] = useState('A');
+  const [newSubMarks, setNewSubMarks] = useState<number>(85);
   const [newSubTargetRequired, setNewSubTargetRequired] = useState(true);
   const [error, setError] = useState('');
+
+  // Marks Edit Modal states
+  const [marksModalOpen, setMarksModalOpen] = useState(false);
+  const [targetSubToEdit, setTargetSubToEdit] = useState<Subject | null>(null);
+  const [editMarksVal, setEditMarksVal] = useState<number>(0);
+  const [editGradeVal, setEditGradeVal] = useState<string>('A');
 
   // Quick log states
   const [logSubName, setLogSubName] = useState('');
@@ -68,7 +76,7 @@ export const Attendance: React.FC = () => {
   const [editLogNotes, setEditLogNotes] = useState('');
 
   // Timetable view & import states
-  const [viewMode, setViewMode] = useState<'subjects' | 'worksheet'>('subjects');
+  const [viewMode, setViewMode] = useState<'subjects' | 'worksheet' | 'analytics'>('subjects');
   const [showTimetableModal, setShowTimetableModal] = useState(false);
   const [timetableSlots, setTimetableSlots] = useState<any[]>([]);
 
@@ -188,6 +196,7 @@ export const Attendance: React.FC = () => {
           priority: newSubPriority,
           effort_needed: newSubEffort,
           projected_grade: newSubGrade,
+          current_marks: newSubMarks,
           attendance_target_required: newSubTargetRequired ? 1 : 0
         })
       });
@@ -205,6 +214,157 @@ export const Attendance: React.FC = () => {
       setError(err.message || 'Error occurred');
     }
   };
+
+  const handleOpenMarksModal = (sub: Subject) => {
+    setTargetSubToEdit(sub);
+    setEditMarksVal(sub.current_marks !== undefined ? sub.current_marks : 0);
+    setEditGradeVal(sub.projected_grade || 'A');
+    setMarksModalOpen(true);
+  };
+
+  const handleSaveMarksAndGrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetSubToEdit || !token) return;
+
+    try {
+      const res = await fetch(`${apiUrl}/tracker/subjects/${targetSubToEdit.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: targetSubToEdit.name,
+          attendance_target: targetSubToEdit.attendance_target,
+          attendance_target_required: targetSubToEdit.attendance_target_required,
+          priority: targetSubToEdit.priority,
+          effort_needed: targetSubToEdit.effort_needed,
+          projected_grade: editGradeVal,
+          current_marks: editMarksVal
+        })
+      });
+      if (res.ok) {
+        setMarksModalOpen(false);
+        setTargetSubToEdit(null);
+        fetchData();
+      }
+    } catch (err) {
+      console.error('Save marks error:', err);
+    }
+  };
+
+  // SMART ATTENDANCE & MARKS ANALYTICS
+  const academicStats = useMemo(() => {
+    const totalSubjects = subjects.length;
+    if (totalSubjects === 0) {
+      return {
+        overallAttendancePct: 0,
+        avgMarks: 0,
+        projectedGPA: '0.00',
+        criticalCount: 0,
+        safeCount: 0,
+        cautionCount: 0,
+        quadrants: { excelling: [] as Subject[], attendanceRisk: [] as Subject[], supportNeeded: [] as Subject[], critical: [] as Subject[] },
+        gradeDistribution: {} as Record<string, number>,
+        insights: ['Add your enrolled courses to calculate academic marks and attendance runway analytics.']
+      };
+    }
+
+    let totalPresent = 0;
+    let totalClasses = 0;
+    let sumMarks = 0;
+    let gpaSum = 0;
+    let criticalCount = 0;
+    let safeCount = 0;
+    let cautionCount = 0;
+
+    const gradeToGPA: Record<string, number> = {
+      'A+': 4.0, 'A': 4.0, 'A-': 3.7,
+      'B+': 3.3, 'B': 3.0, 'B-': 2.7,
+      'C+': 2.3, 'C': 2.0, 'C-': 1.7,
+      'D': 1.0, 'F': 0.0
+    };
+
+    const gradeDistribution: Record<string, number> = {};
+
+    const quadrants: {
+      excelling: Subject[];
+      attendanceRisk: Subject[];
+      supportNeeded: Subject[];
+      critical: Subject[];
+    } = {
+      excelling: [],
+      attendanceRisk: [],
+      supportNeeded: [],
+      critical: []
+    };
+
+    subjects.forEach(sub => {
+      totalPresent += sub.present_count;
+      const subClasses = sub.present_count + sub.absent_count;
+      totalClasses += subClasses;
+
+      const marks = sub.current_marks !== undefined ? sub.current_marks : 0;
+      sumMarks += marks;
+
+      const normalizedGrade = sub.projected_grade?.trim().toUpperCase() || 'A';
+      const subGPA = gradeToGPA[normalizedGrade] !== undefined ? gradeToGPA[normalizedGrade] : 3.5;
+      gpaSum += subGPA;
+
+      gradeDistribution[normalizedGrade] = (gradeDistribution[normalizedGrade] || 0) + 1;
+
+      if (sub.safetyStatus === 'CRITICAL' || marks < 50) criticalCount++;
+      else if (sub.safetyStatus === 'CAUTION') cautionCount++;
+      else safeCount++;
+
+      // Quadrant grouping
+      const target = sub.attendance_target || 80;
+      if (sub.percentage >= target && marks >= 70) {
+        quadrants.excelling.push(sub);
+      } else if (sub.percentage < target && marks >= 70) {
+        quadrants.attendanceRisk.push(sub);
+      } else if (sub.percentage >= target && marks < 70) {
+        quadrants.supportNeeded.push(sub);
+      } else {
+        quadrants.critical.push(sub);
+      }
+    });
+
+    const overallAttendancePct = totalClasses > 0 ? Math.round((totalPresent / totalClasses) * 100) : 100;
+    const avgMarks = Math.round(sumMarks / totalSubjects);
+    const projectedGPA = (gpaSum / totalSubjects).toFixed(2);
+
+    const insights: string[] = [];
+    if (overallAttendancePct >= 80) {
+      insights.push(`🎓 Overall Semester Attendance is at ${overallAttendancePct}%, safely meeting the institutional 80% threshold across all modules.`);
+    } else {
+      insights.push(`🚨 Overall Semester Attendance is ${overallAttendancePct}%, below the required 80% benchmark. Immediate attendance recovery is required.`);
+    }
+
+    if (quadrants.attendanceRisk.length > 0) {
+      insights.push(`⚠️ Debarment Warning: ${quadrants.attendanceRisk.length} course(s) have solid marks (≥70%) but sub-80% attendance. Attend upcoming classes to prevent exam disqualification.`);
+    }
+
+    if (quadrants.critical.length > 0) {
+      insights.push(`🛑 High Alert: ${quadrants.critical.length} module(s) (${quadrants.critical.map(s => s.name).join(', ')}) require urgent intervention in both attendance and assessments.`);
+    }
+
+    if (avgMarks >= 75) {
+      insights.push(`⭐ Projected GPA is ${projectedGPA} with an average assessment mark of ${avgMarks}%. You are performing on Dean's List trajectory.`);
+    }
+
+    return {
+      overallAttendancePct,
+      avgMarks,
+      projectedGPA,
+      criticalCount,
+      safeCount,
+      cautionCount,
+      quadrants,
+      gradeDistribution,
+      insights
+    };
+  }, [subjects]);
 
   const handleDeleteSubject = async (id: number) => {
     if (!window.confirm('Are you sure you want to delete this course subject? This will permanently delete the subject and all its attendance logs.')) return;
@@ -514,7 +674,7 @@ export const Attendance: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2.5 items-center w-full md:w-auto">
             {/* View Mode Toggle */}
-            <div className="flex bg-surface-container rounded-full p-1 border border-outline-variant/30">
+            <div className="flex bg-surface-container rounded-full p-1 border border-outline-variant/30 flex-wrap gap-1">
               <button
                 type="button"
                 onClick={() => setViewMode('subjects')}
@@ -532,6 +692,16 @@ export const Attendance: React.FC = () => {
                 }`}
               >
                 Weekly Worksheet
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('analytics')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  viewMode === 'analytics' ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[15px]">analytics</span>
+                Marks & Attendance Analytics
               </button>
             </div>
 
@@ -757,7 +927,10 @@ export const Attendance: React.FC = () => {
                           Effort: {sub.effort_needed}
                         </span>
                         <span className="bg-primary-container/20 text-primary px-2 py-0.5 rounded text-[10px] font-bold">
-                          Grade Target: {sub.projected_grade}
+                          Grade: {sub.projected_grade}
+                        </span>
+                        <span className="bg-secondary-container/30 text-secondary border border-secondary/20 px-2 py-0.5 rounded text-[10px] font-bold">
+                          Marks: {sub.current_marks !== undefined ? sub.current_marks : 0}%
                         </span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeStyle}`}>
                           {sub.safetyStatus}
@@ -1026,6 +1199,340 @@ export const Attendance: React.FC = () => {
         </div>
       </div>
 
+        {/* ========================================================================= */}
+        {/* View Mode 3: Marks & Attendance Smart Analytics */}
+        {/* ========================================================================= */}
+        {viewMode === 'analytics' && (
+          <div className="space-y-stack-md">
+            {/* KPI Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
+              {/* Overall Semester Attendance Health */}
+              <div className="bg-white border border-outline-variant rounded-xl p-5 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-primary mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider">Overall Attendance</span>
+                    <span className="material-symbols-outlined">donut_large</span>
+                  </div>
+                  <div className="text-display-lg-mobile font-display-lg-mobile font-bold text-on-background font-data-tabular">
+                    {academicStats.overallAttendancePct}%
+                  </div>
+                </div>
+                <div className="mt-3 text-xs font-medium">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    academicStats.overallAttendancePct >= 80 ? 'bg-secondary/15 text-secondary' : 'bg-error-container text-on-error-container'
+                  }`}>
+                    {academicStats.overallAttendancePct >= 80 ? 'Safe (≥ 80% Benchmark Met)' : 'Critical Debarment Risk (< 80%)'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Continuous Assessment / Average Marks */}
+              <div className="bg-white border border-outline-variant rounded-xl p-5 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-secondary mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider">Avg Assessment Marks</span>
+                    <span className="material-symbols-outlined">grade</span>
+                  </div>
+                  <div className="text-display-lg-mobile font-display-lg-mobile font-bold text-on-background font-data-tabular">
+                    {academicStats.avgMarks}%
+                  </div>
+                </div>
+                <div className="mt-3 text-xs font-medium">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    academicStats.avgMarks >= 70 ? 'bg-secondary/15 text-secondary' : 'bg-primary/10 text-primary'
+                  }`}>
+                    {academicStats.avgMarks >= 70 ? 'Distinction Average' : 'Passing Grade Range'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Projected Semester GPA */}
+              <div className="bg-white border border-outline-variant rounded-xl p-5 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-tertiary mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider">Projected GPA</span>
+                    <span className="material-symbols-outlined">school</span>
+                  </div>
+                  <div className="text-display-lg-mobile font-display-lg-mobile font-bold text-on-background font-data-tabular">
+                    {academicStats.projectedGPA} <span className="text-sm font-semibold text-outline">/ 4.00</span>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-outline font-medium">
+                  Based on target grades across {subjects.length} courses
+                </div>
+              </div>
+
+              {/* At-Risk Modules Count */}
+              <div className="bg-white border border-outline-variant rounded-xl p-5 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-error mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider">Modules At Risk</span>
+                    <span className="material-symbols-outlined">warning</span>
+                  </div>
+                  <div className="text-display-lg-mobile font-display-lg-mobile font-bold font-data-tabular text-error">
+                    {academicStats.criticalCount} <span className="text-sm font-semibold text-outline">Subjects</span>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-outline font-medium">
+                  {academicStats.criticalCount === 0 ? 'All courses on track 🎉' : 'Attendance < 80% or Marks < 50%'}
+                </div>
+              </div>
+            </div>
+
+            {/* Smart Academic Observations */}
+            <div className="bg-gradient-to-r from-primary-container/10 via-surface-container-low to-secondary-container/10 border border-primary/20 rounded-xl p-6 shadow-sm">
+              <h3 className="text-headline-md font-bold text-on-background flex items-center gap-2 mb-4">
+                <span className="material-symbols-outlined text-primary">psychology</span>
+                Academic Performance & Debarment Forecast
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {academicStats.insights.map((insight, idx) => (
+                  <div key={idx} className="bg-white p-4 rounded-xl border border-outline-variant/30 shadow-xs text-xs text-on-surface font-medium leading-relaxed">
+                    {insight}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Attendance vs Marks Risk Matrix (Quadrant Analysis) */}
+            <div className="bg-white border border-outline-variant rounded-xl p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 pb-3 border-b border-outline-variant/40">
+                <div>
+                  <h3 className="text-headline-md font-bold text-on-background border-l-4 border-primary pl-3">
+                    Attendance vs Marks Risk Matrix
+                  </h3>
+                  <p className="text-xs text-on-surface-variant mt-0.5">Quadrant mapping of academic score versus mandatory attendance compliance</p>
+                </div>
+                <span className="text-xs text-outline font-medium">Click any course to edit marks/grade</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Quadrant 1: Excelling */}
+                <div className="bg-secondary/10 border border-secondary/30 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-secondary uppercase flex items-center gap-1">
+                      <span className="material-symbols-outlined text-xs">verified</span>
+                      Dean's List / Excelling
+                    </span>
+                    <span className="text-xs font-bold text-secondary font-data-tabular">
+                      {academicStats.quadrants.excelling.length} Course(s)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-outline">High Attendance (≥80%) and High Marks (≥70%)</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {academicStats.quadrants.excelling.length === 0 ? (
+                      <span className="text-xs text-outline italic">None currently</span>
+                    ) : (
+                      academicStats.quadrants.excelling.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleOpenMarksModal(s)}
+                          className="px-3 py-1.5 bg-white border border-secondary/30 rounded-lg text-xs font-bold text-on-surface hover:border-secondary hover:shadow-xs transition-all flex items-center gap-2"
+                        >
+                          <span>{s.name}</span>
+                          <span className="text-secondary font-data-tabular">{s.current_marks || 0}% ({s.projected_grade})</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Quadrant 2: Debarment Risk */}
+                <div className="bg-tertiary-fixed/30 border border-tertiary/30 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-tertiary uppercase flex items-center gap-1">
+                      <span className="material-symbols-outlined text-xs">notification_important</span>
+                      Debarment Risk (High Marks, Low Attendance)
+                    </span>
+                    <span className="text-xs font-bold text-tertiary font-data-tabular">
+                      {academicStats.quadrants.attendanceRisk.length} Course(s)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-outline">High Marks (≥70%) but Sub-80% Attendance Threshold!</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {academicStats.quadrants.attendanceRisk.length === 0 ? (
+                      <span className="text-xs text-outline italic">None currently</span>
+                    ) : (
+                      academicStats.quadrants.attendanceRisk.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleOpenMarksModal(s)}
+                          className="px-3 py-1.5 bg-white border border-tertiary/40 rounded-lg text-xs font-bold text-on-surface hover:border-tertiary hover:shadow-xs transition-all flex items-center gap-2"
+                        >
+                          <span>{s.name}</span>
+                          <span className="text-error font-data-tabular">{s.percentage}% att.</span>
+                          <span className="text-secondary font-data-tabular font-bold">{s.current_marks || 0}%</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Quadrant 3: Academic Support Needed */}
+                <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-primary uppercase flex items-center gap-1">
+                      <span className="material-symbols-outlined text-xs">menu_book</span>
+                      Academic Support Needed
+                    </span>
+                    <span className="text-xs font-bold text-primary font-data-tabular">
+                      {academicStats.quadrants.supportNeeded.length} Course(s)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-outline">Good Attendance (≥80%) but Lower Assessment Marks (&lt;70%)</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {academicStats.quadrants.supportNeeded.length === 0 ? (
+                      <span className="text-xs text-outline italic">None currently</span>
+                    ) : (
+                      academicStats.quadrants.supportNeeded.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleOpenMarksModal(s)}
+                          className="px-3 py-1.5 bg-white border border-primary/30 rounded-lg text-xs font-bold text-on-surface hover:border-primary hover:shadow-xs transition-all flex items-center gap-2"
+                        >
+                          <span>{s.name}</span>
+                          <span className="text-primary font-data-tabular">{s.current_marks || 0}%</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Quadrant 4: Critical Priority */}
+                <div className="bg-error-container/40 border border-error/30 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-error uppercase flex items-center gap-1">
+                      <span className="material-symbols-outlined text-xs">report_problem</span>
+                      Critical Intervention Required
+                    </span>
+                    <span className="text-xs font-bold text-error font-data-tabular">
+                      {academicStats.quadrants.critical.length} Course(s)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-outline">Both Attendance (&lt;80%) and Marks (&lt;60%) Below Targets</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {academicStats.quadrants.critical.length === 0 ? (
+                      <span className="text-xs text-outline italic">None currently</span>
+                    ) : (
+                      academicStats.quadrants.critical.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleOpenMarksModal(s)}
+                          className="px-3 py-1.5 bg-white border border-error/40 rounded-lg text-xs font-bold text-on-surface hover:border-error hover:shadow-xs transition-all flex items-center gap-2"
+                        >
+                          <span>{s.name}</span>
+                          <span className="text-error font-data-tabular font-bold">{s.percentage}% att.</span>
+                          <span className="text-error font-data-tabular font-bold">{s.current_marks || 0}%</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Subject Marks & Attendance Detailed Table */}
+            <div className="bg-white border border-outline-variant rounded-xl shadow-sm overflow-hidden">
+              <div className="p-6 border-b border-outline-variant flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                <div>
+                  <h3 className="text-headline-md font-bold text-on-background">
+                    Course Marks & Attendance Breakdown
+                  </h3>
+                  <p className="text-xs text-on-surface-variant mt-0.5">Overview of continuous assessment marks, safety runway, and grade targets</p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {Object.entries(academicStats.gradeDistribution).map(([grade, count]) => (
+                    <span key={grade} className="px-2.5 py-1 bg-surface-container rounded-lg text-xs font-bold font-data-tabular text-primary">
+                      {grade}: {count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-surface-bright text-xs text-outline border-b border-outline-variant uppercase tracking-wider">
+                      <th className="p-4 font-bold">Course Subject</th>
+                      <th className="p-4 font-bold">Priority / Effort</th>
+                      <th className="p-4 font-bold">Attendance %</th>
+                      <th className="p-4 font-bold">Runway / Debarment Status</th>
+                      <th className="p-4 font-bold">Current Marks (%)</th>
+                      <th className="p-4 font-bold">Target Grade</th>
+                      <th className="p-4 font-bold text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-sm divide-y divide-outline-variant/40">
+                    {subjects.map(s => {
+                      const marks = s.current_marks !== undefined ? s.current_marks : 0;
+                      return (
+                        <tr key={s.id} className="hover:bg-surface-bright transition-colors">
+                          <td className="p-4 font-bold text-on-background">
+                            {s.name}
+                          </td>
+                          <td className="p-4">
+                            <span className="text-[11px] font-semibold text-outline">
+                              {s.priority} / {s.effort_needed}
+                            </span>
+                          </td>
+                          <td className="p-4 font-data-tabular">
+                            <span className={`font-bold ${s.percentage >= (s.attendance_target || 80) ? 'text-secondary' : 'text-error'}`}>
+                              {s.percentage}%
+                            </span>
+                            <span className="text-xs text-outline"> / {s.attendance_target}%</span>
+                          </td>
+                          <td className="p-4 text-xs font-medium">
+                            <span className={`flex items-center gap-1 ${
+                              s.safetyStatus === 'CRITICAL' ? 'text-error' : s.safetyStatus === 'CAUTION' ? 'text-tertiary' : 'text-secondary'
+                            }`}>
+                              <span className="material-symbols-outlined text-sm">
+                                {s.safetyStatus === 'CRITICAL' ? 'warning' : s.safetyStatus === 'CAUTION' ? 'info' : 'check_circle'}
+                              </span>
+                              {s.message}
+                            </span>
+                          </td>
+                          <td className="p-4 font-data-tabular min-w-[150px]">
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-xs font-bold">
+                                <span className={marks >= 70 ? 'text-secondary' : marks >= 50 ? 'text-primary' : 'text-error'}>
+                                  {marks}%
+                                </span>
+                              </div>
+                              <div className="w-full bg-surface-container rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    marks >= 70 ? 'bg-secondary' : marks >= 50 ? 'bg-primary' : 'bg-error'
+                                  }`}
+                                  style={{ width: `${Math.min(100, marks)}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4 font-data-tabular">
+                            <span className="px-2.5 py-1 bg-primary/10 text-primary rounded-lg text-xs font-bold">
+                              {s.projected_grade}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenMarksModal(s)}
+                              className="px-3 py-1.5 bg-surface-container text-primary hover:bg-primary hover:text-white rounded-lg text-xs font-bold transition-all shadow-xs"
+                            >
+                              Update Marks
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
       {/* Add Subject Modal Dialog */}
       {showModal && (
         <div className="fixed inset-0 bg-[#0d1c2e]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1097,17 +1604,30 @@ export const Attendance: React.FC = () => {
                     placeholder="e.g. A+"
                   />
                 </div>
-                <div className="flex items-center mt-6">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newSubTargetRequired}
-                      onChange={(e) => setNewSubTargetRequired(e.target.checked)}
-                      className="w-5 h-5 border-outline-variant rounded text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-on-surface-variant uppercase">80% Target Required</span>
-                  </label>
+                <div>
+                  <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Current Marks (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={newSubMarks}
+                    onChange={(e) => setNewSubMarks(Number(e.target.value))}
+                    className="w-full bg-[#f8f9ff] border border-outline-variant rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary focus:outline-none font-bold"
+                    placeholder="e.g. 85"
+                  />
                 </div>
+              </div>
+
+              <div className="flex items-center">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newSubTargetRequired}
+                    onChange={(e) => setNewSubTargetRequired(e.target.checked)}
+                    className="w-5 h-5 border-outline-variant rounded text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-on-surface-variant uppercase">80% Target Required</span>
+                </label>
               </div>
 
               <div className="flex gap-3 justify-end pt-4 border-t border-outline-variant/30">
@@ -1527,6 +2047,116 @@ export const Attendance: React.FC = () => {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Quick Edit Marks & Target Grade Modal */}
+      {marksModalOpen && targetSubToEdit && (
+        <div className="fixed inset-0 bg-[#0d1c2e]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-md bg-white border border-outline-variant rounded-xl shadow-xl overflow-hidden relative">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-secondary"></div>
+            <div className="p-6 border-b border-outline-variant bg-surface-bright flex justify-between items-center">
+              <div>
+                <h3 className="text-headline-md font-bold text-on-background flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">edit_note</span>
+                  Update Marks & Target Grade
+                </h3>
+                <p className="text-xs text-on-surface-variant mt-0.5 font-medium">{targetSubToEdit.name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMarksModalOpen(false);
+                  setTargetSubToEdit(null);
+                }}
+                className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMarksAndGrade} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">
+                  Current Assessment Marks (0 - 100%)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={editMarksVal}
+                    onChange={(e) => setEditMarksVal(Number(e.target.value))}
+                    className="w-full bg-[#f8f9ff] border border-outline-variant rounded-lg p-2.5 text-base font-bold font-data-tabular focus:ring-2 focus:ring-secondary focus:outline-none"
+                    required
+                  />
+                  <span className="absolute right-3 top-2.5 text-sm font-bold text-outline">%</span>
+                </div>
+                <p className="text-[11px] text-outline mt-1 font-sans">
+                  Midterm exams, assignments, labs, or continuous assessment aggregate.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">
+                  Projected Target Grade
+                </label>
+                <select
+                  value={editGradeVal}
+                  onChange={(e) => setEditGradeVal(e.target.value)}
+                  className="w-full bg-[#f8f9ff] border border-outline-variant rounded-lg p-2.5 text-sm font-semibold focus:ring-2 focus:ring-secondary focus:outline-none"
+                >
+                  <option value="A+">A+ (GPA 4.0 - Exceptional)</option>
+                  <option value="A">A (GPA 4.0 - Excellent)</option>
+                  <option value="A-">A- (GPA 3.7 - Very Good)</option>
+                  <option value="B+">B+ (GPA 3.3 - Good)</option>
+                  <option value="B">B (GPA 3.0 - Satisfactory)</option>
+                  <option value="B-">B- (GPA 2.7 - Adequate)</option>
+                  <option value="C+">C+ (GPA 2.3 - Pass)</option>
+                  <option value="C">C (GPA 2.0 - Minimum Pass)</option>
+                  <option value="F">F (GPA 0.0 - Fail)</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-surface-container-low rounded-lg border border-outline-variant/50 text-xs space-y-1">
+                <div className="flex justify-between font-medium">
+                  <span className="text-outline">Attendance Status:</span>
+                  <span className={`font-bold ${targetSubToEdit.percentage >= (targetSubToEdit.attendance_target || 80) ? 'text-secondary' : 'text-error'}`}>
+                    {targetSubToEdit.percentage}%
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span className="text-outline">Academic Risk Category:</span>
+                  <span className="font-bold text-on-surface">
+                    {targetSubToEdit.percentage >= 80 && editMarksVal >= 70 ? '🟢 Excelling' :
+                     targetSubToEdit.percentage < 80 && editMarksVal >= 70 ? '🟡 Debarment Risk' :
+                     targetSubToEdit.percentage >= 80 && editMarksVal < 70 ? '🟠 Marks Support Needed' :
+                     '🔴 Critical Dual Risk'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end pt-4 border-t border-outline-variant/30">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMarksModalOpen(false);
+                    setTargetSubToEdit(null);
+                  }}
+                  className="px-4 py-2 border border-outline-variant rounded-lg text-sm text-on-surface hover:bg-surface-container font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-secondary text-white rounded-lg text-sm font-semibold hover:opacity-95 shadow-sm transition-all"
+                >
+                  Save Marks & Grade
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

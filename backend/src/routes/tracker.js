@@ -1,6 +1,6 @@
 import express from 'express';
 import db from '../config/db.js';
-import { verifyToken } from '../middleware/auth.js';
+import { verifyToken, requireAdmin } from '../middleware/auth.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { parseTimetableCsv } from '../utils/timetable.js';
 
@@ -83,10 +83,11 @@ router.post('/timetable/import', verifyToken, async (req, res) => {
           const encPriority = encrypt('Medium', req.userKey);
           const encEffort = encrypt('Medium', req.userKey);
           const encGrade = encrypt('A', req.userKey);
+          const encMarks = encrypt(0, req.userKey);
           await runQuery(
-            `INSERT INTO subjects (user_id, name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [req.userId, encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade]
+            `INSERT INTO subjects (user_id, name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade, current_marks)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [req.userId, encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade, encMarks]
           );
         }
     }
@@ -187,7 +188,8 @@ router.get('/subjects', verifyToken, async (req, res) => {
         attendance_target_required: decrypt(sub.attendance_target_required, req.userKey, 'number'),
         priority: decrypt(sub.priority, req.userKey, 'string'),
         effort_needed: decrypt(sub.effort_needed, req.userKey, 'string'),
-        projected_grade: decrypt(sub.projected_grade, req.userKey, 'string')
+        projected_grade: decrypt(sub.projected_grade, req.userKey, 'string'),
+        current_marks: sub.current_marks ? decrypt(sub.current_marks, req.userKey, 'number') : 0
       };
 
       let logsQuery = 'SELECT status FROM attendance_logs WHERE subject_id = ?';
@@ -264,7 +266,7 @@ router.get('/subjects', verifyToken, async (req, res) => {
 });
 
 router.post('/subjects/add', verifyToken, async (req, res) => {
-  const { name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade } = req.body;
+  const { name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade, current_marks } = req.body;
   if (!name) return res.status(400).json({ error: 'Subject name is required.' });
 
   try {
@@ -281,11 +283,12 @@ router.post('/subjects/add', verifyToken, async (req, res) => {
     const encPriority = encrypt(priority || 'Medium', req.userKey);
     const encEffort = encrypt(effort_needed || 'Medium', req.userKey);
     const encGrade = encrypt(projected_grade || 'A', req.userKey);
+    const encMarks = encrypt(current_marks !== undefined && current_marks !== null ? Number(current_marks) : 0, req.userKey);
 
     await runQuery(
-      `INSERT INTO subjects (user_id, name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [req.userId, encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade]
+      `INSERT INTO subjects (user_id, name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade, current_marks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.userId, encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade, encMarks]
     );
     res.status(201).json({ message: 'Subject added successfully.' });
   } catch (err) {
@@ -294,7 +297,7 @@ router.post('/subjects/add', verifyToken, async (req, res) => {
 });
 
 router.put('/subjects/:id', verifyToken, async (req, res) => {
-  const { name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade } = req.body;
+  const { name, attendance_target, attendance_target_required, priority, effort_needed, projected_grade, current_marks } = req.body;
   
   try {
     const encName = encrypt(name, req.userKey);
@@ -303,12 +306,13 @@ router.put('/subjects/:id', verifyToken, async (req, res) => {
     const encPriority = encrypt(priority, req.userKey);
     const encEffort = encrypt(effort_needed, req.userKey);
     const encGrade = encrypt(projected_grade, req.userKey);
+    const encMarks = encrypt(current_marks !== undefined && current_marks !== null ? Number(current_marks) : 0, req.userKey);
 
     await runQuery(
       `UPDATE subjects 
-       SET name = ?, attendance_target = ?, attendance_target_required = ?, priority = ?, effort_needed = ?, projected_grade = ?
+       SET name = ?, attendance_target = ?, attendance_target_required = ?, priority = ?, effort_needed = ?, projected_grade = ?, current_marks = ?
        WHERE id = ? AND user_id = ?`,
-      [encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade, req.params.id, req.userId]
+      [encName, encTarget, encTargetRequired, encPriority, encEffort, encGrade, encMarks, req.params.id, req.userId]
     );
     res.json({ message: 'Subject updated successfully.' });
   } catch (err) {
@@ -453,7 +457,7 @@ router.put('/attendance/log/:id', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// 5. FINANCE (DAILY SPENDING) ENDPOINTS
+// 5. FINANCE (DAILY & WEEKLY SPENDING / INCOME) ENDPOINTS
 // ==========================================
 router.get('/finance/transactions', verifyToken, async (req, res) => {
   try {
@@ -461,12 +465,23 @@ router.get('/finance/transactions', verifyToken, async (req, res) => {
       'SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC',
       [req.userId]
     );
-    const decryptedRows = rows.map(r => ({
-      ...r,
-      amount: decrypt(r.amount, req.userKey, 'number'),
-      category: decrypt(r.category, req.userKey, 'string'),
-      description: decrypt(r.description, req.userKey, 'string')
-    }));
+    const decryptedRows = rows.map(r => {
+      let decType = 'expense';
+      if (r.type) {
+        try {
+          decType = decrypt(r.type, req.userKey, 'string');
+        } catch (e) {
+          decType = r.type;
+        }
+      }
+      return {
+        ...r,
+        amount: decrypt(r.amount, req.userKey, 'number'),
+        category: decrypt(r.category, req.userKey, 'string'),
+        description: decrypt(r.description, req.userKey, 'string'),
+        type: decType || 'expense'
+      };
+    });
     res.json(decryptedRows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -474,7 +489,7 @@ router.get('/finance/transactions', verifyToken, async (req, res) => {
 });
 
 router.post('/finance/transactions', verifyToken, async (req, res) => {
-  const { amount, category, description, date } = req.body;
+  const { amount, category, description, date, type } = req.body;
   if (!amount || !category || !date) {
     return res.status(400).json({ error: 'Amount, category, and date are required.' });
   }
@@ -482,13 +497,15 @@ router.post('/finance/transactions', verifyToken, async (req, res) => {
   try {
     const encAmount = encrypt(amount, req.userKey);
     const encCategory = encrypt(category, req.userKey);
-    const encDescription = encrypt(description, req.userKey);
+    const encDescription = encrypt(description || '', req.userKey);
+    const txType = type === 'income' ? 'income' : 'expense';
+    const encType = encrypt(txType, req.userKey);
 
     await runQuery(
-      'INSERT INTO transactions (user_id, amount, category, description, date) VALUES (?, ?, ?, ?, ?)',
-      [req.userId, encAmount, encCategory, encDescription, date]
+      'INSERT INTO transactions (user_id, amount, category, description, date, type) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.userId, encAmount, encCategory, encDescription, date, encType]
     );
-    res.status(201).json({ message: 'Transaction logged successfully.' });
+    res.status(201).json({ message: `${txType === 'income' ? 'Income' : 'Transaction'} logged successfully.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -512,52 +529,123 @@ router.get('/finance/summary', verifyToken, async (req, res) => {
     const monthlyLimit = user?.monthly_budget_limit ? decrypt(user.monthly_budget_limit, req.userKey, 'number') : 30000;
     const dailyLimit = user?.daily_budget_limit ? decrypt(user.daily_budget_limit, req.userKey, 'number') : 1000;
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
     const thisMonthPrefix = todayStr.substring(0, 7); // YYYY-MM
+
+    // Current week date calculation (Monday to Sunday)
+    const currentDayOfWeek = now.getDay();
+    const diffToMonday = now.getDate() - currentDayOfWeek + (currentDayOfWeek === 0 ? -6 : 1);
+    const mondayDate = new Date(now);
+    mondayDate.setDate(diffToMonday);
+    mondayDate.setHours(0, 0, 0, 0);
+
+    const sundayDate = new Date(mondayDate);
+    sundayDate.setDate(sundayDate.getDate() + 6);
+    sundayDate.setHours(23, 59, 59, 999);
+
+    const mondayStr = mondayDate.toISOString().split('T')[0];
+    const sundayStr = sundayDate.toISOString().split('T')[0];
+
+    // Calendar days in month calculations
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const daysRemainingInMonth = Math.max(1, totalDaysInMonth - dayOfMonth + 1);
 
     // Fetch all transactions for this user
     const transactions = await allQuery(
-      'SELECT amount, category, date FROM transactions WHERE user_id = ?',
+      'SELECT id, amount, category, description, date, type FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC',
       [req.userId]
     );
 
     // Decrypt transactions in memory
-    const decryptedTx = transactions.map(t => ({
-      amount: decrypt(t.amount, req.userKey, 'number'),
-      category: decrypt(t.category, req.userKey, 'string'),
-      date: t.date
-    }));
+    const decryptedTx = transactions.map(t => {
+      let decType = 'expense';
+      if (t.type) {
+        try {
+          decType = decrypt(t.type, req.userKey, 'string');
+        } catch (e) {
+          decType = t.type;
+        }
+      }
+      return {
+        id: t.id,
+        amount: decrypt(t.amount, req.userKey, 'number'),
+        category: decrypt(t.category, req.userKey, 'string'),
+        description: decrypt(t.description, req.userKey, 'string'),
+        date: t.date,
+        type: decType || 'expense'
+      };
+    });
 
-    // Calculate monthly spent
+    // Calculate monthly spent and monthly income
     let monthlySpent = 0;
-    decryptedTx.forEach(t => {
-      if (t.date && t.date.startsWith(thisMonthPrefix)) {
-        monthlySpent += t.amount || 0;
-      }
-    });
+    let monthlyIncome = 0;
+    let monthlyTxCount = 0;
 
-    // Calculate daily spent
+    // Calculate weekly spent and weekly income
+    let weeklySpent = 0;
+    let weeklyIncome = 0;
+
+    // Calculate daily spent and daily income
     let dailySpent = 0;
+    let dailyIncome = 0;
+
     decryptedTx.forEach(t => {
+      const isExpense = t.type === 'expense';
+      const isIncome = t.type === 'income';
+
+      if (t.date && t.date.startsWith(thisMonthPrefix)) {
+        if (isExpense) monthlySpent += t.amount || 0;
+        if (isIncome) monthlyIncome += t.amount || 0;
+        monthlyTxCount++;
+      }
+
+      if (t.date && t.date >= mondayStr && t.date <= sundayStr) {
+        if (isExpense) weeklySpent += t.amount || 0;
+        if (isIncome) weeklyIncome += t.amount || 0;
+      }
+
       if (t.date === todayStr) {
-        dailySpent += t.amount || 0;
+        if (isExpense) dailySpent += t.amount || 0;
+        if (isIncome) dailyIncome += t.amount || 0;
       }
     });
 
-    // Category breakdown (for pie chart)
+    // Category breakdown for expenses
     const categoryMap = {};
+    const incomeCategoryMap = {};
+
     decryptedTx.forEach(t => {
       if (t.date && t.date.startsWith(thisMonthPrefix)) {
         const cat = t.category || 'Other';
-        categoryMap[cat] = (categoryMap[cat] || 0) + (t.amount || 0);
+        if (t.type === 'expense') {
+          categoryMap[cat] = (categoryMap[cat] || 0) + (t.amount || 0);
+        } else if (t.type === 'income') {
+          incomeCategoryMap[cat] = (incomeCategoryMap[cat] || 0) + (t.amount || 0);
+        }
       }
     });
-    const categories = Object.entries(categoryMap).map(([category, amount]) => ({
-      category,
-      amount
-    }));
 
-    // Recent 7 days spending details (trends for line chart)
+    const categories = Object.entries(categoryMap)
+      .map(([category, amount]) => ({
+        category,
+        amount,
+        percentage: monthlySpent > 0 ? Math.round((amount / monthlySpent) * 100) : 0
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const incomeCategories = Object.entries(incomeCategoryMap)
+      .map(([category, amount]) => ({
+        category,
+        amount,
+        percentage: monthlyIncome > 0 ? Math.round((amount / monthlyIncome) * 100) : 0
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    // Recent 7 days spending & income trends
     const trends = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -565,27 +653,102 @@ router.get('/finance/summary', verifyToken, async (req, res) => {
       const dateStr = d.toISOString().split('T')[0];
       const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
       
-      let dayTotal = 0;
+      let dayExpense = 0;
+      let dayInc = 0;
       decryptedTx.forEach(t => {
         if (t.date === dateStr) {
-          dayTotal += t.amount || 0;
+          if (t.type === 'income') {
+            dayInc += t.amount || 0;
+          } else {
+            dayExpense += t.amount || 0;
+          }
         }
       });
 
       trends.push({
         date: dateStr,
         day: dayName,
-        amount: dayTotal
+        amount: dayExpense,
+        income: dayInc,
+        net: dayInc - dayExpense
       });
+    }
+
+    // Weekly history breakdown (last 4 weeks)
+    const weeklyTrends = [];
+    for (let w = 3; w >= 0; w--) {
+      const wStart = new Date(mondayDate);
+      wStart.setDate(wStart.getDate() - (w * 7));
+      const wEnd = new Date(wStart);
+      wEnd.setDate(wEnd.getDate() + 6);
+
+      const wStartStr = wStart.toISOString().split('T')[0];
+      const wEndStr = wEnd.toISOString().split('T')[0];
+
+      let wExpense = 0;
+      let wIncome = 0;
+
+      decryptedTx.forEach(t => {
+        if (t.date >= wStartStr && t.date <= wEndStr) {
+          if (t.type === 'income') wIncome += t.amount || 0;
+          else wExpense += t.amount || 0;
+        }
+      });
+
+      const label = `${wStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${wEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      weeklyTrends.push({
+        weekLabel: label,
+        startDate: wStartStr,
+        endDate: wEndStr,
+        income: wIncome,
+        spent: wExpense,
+        net: wIncome - wExpense,
+        isCurrentWeek: w === 0
+      });
+    }
+
+    // Analytics indicators
+    const remainingMonthlyBudget = Math.max(0, monthlyLimit - monthlySpent);
+    const averageDailySpend = Math.round(monthlySpent / Math.max(1, dayOfMonth));
+    const projectedMonthlySpend = Math.round(averageDailySpend * totalDaysInMonth);
+    const safeDailyRemaining = Math.max(0, Math.round(remainingMonthlyBudget / daysRemainingInMonth));
+    const expectedSavings = monthlyLimit - projectedMonthlySpend;
+    const monthlyNetSavings = monthlyIncome - monthlySpent;
+    const weeklyNetSavings = weeklyIncome - weeklySpent;
+
+    let budgetStatus = 'healthy';
+    if (monthlySpent > monthlyLimit) {
+      budgetStatus = 'exceeded';
+    } else if (projectedMonthlySpend > monthlyLimit || (monthlySpent / monthlyLimit) > 0.85) {
+      budgetStatus = 'warning';
     }
 
     res.json({
       monthlyLimit,
       dailyLimit,
       monthlySpent,
+      monthlyIncome,
+      monthlyNetSavings,
+      weeklySpent,
+      weeklyIncome,
+      weeklyNetSavings,
+      weeklyTarget: Math.round(monthlyLimit / 4.33),
       dailySpent,
+      dailyIncome,
+      remainingMonthlyBudget,
+      averageDailySpend,
+      projectedMonthlySpend,
+      safeDailyRemaining,
+      expectedSavings,
+      budgetStatus,
+      totalDaysInMonth,
+      dayOfMonth,
+      daysRemainingInMonth,
+      monthlyTxCount,
       categories,
-      trends
+      incomeCategories,
+      trends,
+      weeklyTrends
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -595,30 +758,68 @@ router.get('/finance/summary', verifyToken, async (req, res) => {
 // ==========================================
 // 6. GYM & HEALTH TRACKER ENDPOINTS
 // ==========================================
-router.get('/gym/daily', verifyToken, async (req, res) => {
+// 6. GYM & HEALTH TRACKER ENDPOINTS (Admin Only)
+// ==========================================
+router.get('/gym/daily', verifyToken, requireAdmin, async (req, res) => {
   const { date } = req.query;
-  if (!date) return res.status(400).json({ error: 'Date is required.' });
 
   try {
-    let log = await getQuery('SELECT * FROM gym_daily_logs WHERE user_id = ? AND date = ?', [req.userId, date]);
-    if (log) {
-      log = {
-        ...log,
-        visited: decrypt(log.visited, req.userKey, 'number'),
-        water_intake_ml: decrypt(log.water_intake_ml, req.userKey, 'number'),
-        sleep_hours: decrypt(log.sleep_hours, req.userKey, 'number'),
-        workout_summary: decrypt(log.workout_summary, req.userKey, 'string')
-      };
-    } else {
-      log = { user_id: req.userId, date, visited: 0, water_intake_ml: 0, sleep_hours: 0, workout_summary: '' };
+    if (date) {
+      let log = await getQuery('SELECT * FROM gym_daily_logs WHERE user_id = ? AND date = ?', [req.userId, date]);
+      if (log) {
+        log = {
+          ...log,
+          visited: decrypt(log.visited, req.userKey, 'number'),
+          water_intake_ml: decrypt(log.water_intake_ml, req.userKey, 'number'),
+          sleep_hours: decrypt(log.sleep_hours, req.userKey, 'number'),
+          workout_summary: decrypt(log.workout_summary, req.userKey, 'string')
+        };
+      } else {
+        log = { user_id: req.userId, date, visited: 0, water_intake_ml: 0, sleep_hours: 0, workout_summary: '' };
+      }
+      return res.json(log);
     }
-    res.json(log);
+
+    // Return all daily health logs if date is not specified
+    const rows = await allQuery(
+      'SELECT * FROM gym_daily_logs WHERE user_id = ? ORDER BY date DESC',
+      [req.userId]
+    );
+    const decryptedLogs = rows.map(l => ({
+      id: l.id,
+      date: l.date,
+      visited: decrypt(l.visited, req.userKey, 'number'),
+      water_intake_ml: decrypt(l.water_intake_ml, req.userKey, 'number'),
+      sleep_hours: decrypt(l.sleep_hours, req.userKey, 'number'),
+      workout_summary: decrypt(l.workout_summary, req.userKey, 'string')
+    }));
+    res.json(decryptedLogs);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/gym/daily', verifyToken, async (req, res) => {
+router.get('/gym/daily/history', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const rows = await allQuery(
+      'SELECT * FROM gym_daily_logs WHERE user_id = ? ORDER BY date DESC',
+      [req.userId]
+    );
+    const decryptedLogs = rows.map(l => ({
+      id: l.id,
+      date: l.date,
+      visited: decrypt(l.visited, req.userKey, 'number'),
+      water_intake_ml: decrypt(l.water_intake_ml, req.userKey, 'number'),
+      sleep_hours: decrypt(l.sleep_hours, req.userKey, 'number'),
+      workout_summary: decrypt(l.workout_summary, req.userKey, 'string')
+    }));
+    res.json(decryptedLogs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/gym/daily', verifyToken, requireAdmin, async (req, res) => {
   const { date, visited, water_intake_ml, sleep_hours, workout_summary } = req.body;
   if (!date) return res.status(400).json({ error: 'Date is required.' });
 
@@ -628,23 +829,37 @@ router.post('/gym/daily', verifyToken, async (req, res) => {
     const encSleep = encrypt(sleep_hours || 0.0, req.userKey);
     const encWorkout = encrypt(workout_summary || '', req.userKey);
 
-    await runQuery(
-      `INSERT INTO gym_daily_logs (user_id, date, visited, water_intake_ml, sleep_hours, workout_summary)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(date) DO UPDATE SET
-         visited = excluded.visited,
-         water_intake_ml = excluded.water_intake_ml,
-         sleep_hours = excluded.sleep_hours,
-         workout_summary = excluded.workout_summary`,
-      [req.userId, date, encVisited, encWater, encSleep, encWorkout]
-    );
+    const existing = await getQuery('SELECT id FROM gym_daily_logs WHERE user_id = ? AND date = ?', [req.userId, date]);
+    if (existing) {
+      await runQuery(
+        `UPDATE gym_daily_logs 
+         SET visited = ?, water_intake_ml = ?, sleep_hours = ?, workout_summary = ?
+         WHERE id = ?`,
+        [encVisited, encWater, encSleep, encWorkout, existing.id]
+      );
+    } else {
+      await runQuery(
+        `INSERT INTO gym_daily_logs (user_id, date, visited, water_intake_ml, sleep_hours, workout_summary)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [req.userId, date, encVisited, encWater, encSleep, encWorkout]
+      );
+    }
     res.json({ message: 'Daily gym status saved successfully.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/gym/templates', verifyToken, async (req, res) => {
+router.delete('/gym/daily/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await runQuery('DELETE FROM gym_daily_logs WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
+    res.json({ message: 'Daily health check-in deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/gym/templates', verifyToken, requireAdmin, async (req, res) => {
   try {
     const templates = await allQuery('SELECT * FROM workout_templates WHERE user_id = ?', [req.userId]);
     const fullTemplates = [];
@@ -672,8 +887,8 @@ router.get('/gym/templates', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/gym/templates', verifyToken, async (req, res) => {
-  const { name, exercises } = req.body; // exercises: array of strings
+router.post('/gym/templates', verifyToken, requireAdmin, async (req, res) => {
+  const { name, exercises } = req.body;
   if (!name) return res.status(400).json({ error: 'Template name is required.' });
 
   try {
@@ -696,12 +911,12 @@ router.post('/gym/templates', verifyToken, async (req, res) => {
   }
 });
 
-router.get('/gym/logs', verifyToken, async (req, res) => {
+router.get('/gym/logs', verifyToken, requireAdmin, async (req, res) => {
   const { date } = req.query;
   try {
     const sql = date 
       ? 'SELECT * FROM workout_logs WHERE user_id = ? AND date = ?' 
-      : 'SELECT * FROM workout_logs WHERE user_id = ? ORDER BY date DESC';
+      : 'SELECT * FROM workout_logs WHERE user_id = ? ORDER BY date DESC, id DESC';
     const params = date ? [req.userId, date] : [req.userId];
     
     const rows = await allQuery(sql, params);
@@ -716,8 +931,8 @@ router.get('/gym/logs', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/gym/logs', verifyToken, async (req, res) => {
-  const { date, exercise_name, sets } = req.body; // sets: array of {reps, weight}
+router.post('/gym/logs', verifyToken, requireAdmin, async (req, res) => {
+  const { date, exercise_name, sets } = req.body;
   if (!date || !exercise_name || !sets) {
     return res.status(400).json({ error: 'Date, exercise name, and sets are required.' });
   }
@@ -736,10 +951,19 @@ router.post('/gym/logs', verifyToken, async (req, res) => {
   }
 });
 
+router.delete('/gym/logs/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await runQuery('DELETE FROM workout_logs WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
+    res.json({ message: 'Workout log deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
-// 7. SKINCARE TRACKER ENDPOINTS
+// 7. SKINCARE TRACKER ENDPOINTS (Admin Only)
 // ==========================================
-router.get('/skincare/daily', verifyToken, async (req, res) => {
+router.get('/skincare/daily', verifyToken, requireAdmin, async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Date is required.' });
 
@@ -760,7 +984,27 @@ router.get('/skincare/daily', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/skincare/daily', verifyToken, async (req, res) => {
+router.get('/skincare/history', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const rows = await allQuery(
+      'SELECT * FROM skincare_logs WHERE user_id = ? ORDER BY date DESC, id DESC',
+      [req.userId]
+    );
+    const decryptedRows = rows.map(l => ({
+      id: l.id,
+      date: l.date,
+      routine_type: l.routine_type,
+      completed_items: decrypt(l.completed_items, req.userKey, 'json'),
+      skin_rating: decrypt(l.skin_rating, req.userKey, 'number'),
+      notes: decrypt(l.notes, req.userKey, 'string')
+    }));
+    res.json(decryptedRows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/skincare/daily', verifyToken, requireAdmin, async (req, res) => {
   const { date, routine_type, completed_items, skin_rating, notes } = req.body;
   if (!date || !routine_type || !completed_items) {
     return res.status(400).json({ error: "Date, routine_type ('morning' or 'night'), and completed_items are required." });
@@ -786,10 +1030,19 @@ router.post('/skincare/daily', verifyToken, async (req, res) => {
   }
 });
 
+router.delete('/skincare/logs/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await runQuery('DELETE FROM skincare_logs WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
+    res.json({ message: 'Skincare log deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
-// 8. PROJECTS ENDPOINTS
+// 8. PROJECTS ENDPOINTS (Admin Only)
 // ==========================================
-router.get('/projects', verifyToken, async (req, res) => {
+router.get('/projects', verifyToken, requireAdmin, async (req, res) => {
   try {
     const rows = await allQuery('SELECT * FROM projects WHERE user_id = ? ORDER BY due_date ASC', [req.userId]);
     const decryptedRows = rows.map(r => ({
@@ -804,7 +1057,7 @@ router.get('/projects', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/projects', verifyToken, async (req, res) => {
+router.post('/projects', verifyToken, requireAdmin, async (req, res) => {
   const { name, description, status, due_date, priority } = req.body;
   if (!name) return res.status(400).json({ error: 'Project name is required.' });
 
@@ -824,7 +1077,7 @@ router.post('/projects', verifyToken, async (req, res) => {
   }
 });
 
-router.put('/projects/:id', verifyToken, async (req, res) => {
+router.put('/projects/:id', verifyToken, requireAdmin, async (req, res) => {
   const { name, description, status, due_date, priority } = req.body;
   try {
     const encName = encrypt(name, req.userKey);
@@ -843,7 +1096,7 @@ router.put('/projects/:id', verifyToken, async (req, res) => {
   }
 });
 
-router.delete('/projects/:id', verifyToken, async (req, res) => {
+router.delete('/projects/:id', verifyToken, requireAdmin, async (req, res) => {
   try {
     await runQuery('DELETE FROM projects WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
     res.json({ message: 'Project deleted.' });
@@ -853,9 +1106,9 @@ router.delete('/projects/:id', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// 9. COURSES ENDPOINTS
+// 9. COURSES ENDPOINTS (Admin Only)
 // ==========================================
-router.get('/courses', verifyToken, async (req, res) => {
+router.get('/courses', verifyToken, requireAdmin, async (req, res) => {
   try {
     const rows = await allQuery('SELECT * FROM courses WHERE user_id = ?', [req.userId]);
     const decryptedRows = rows.map(r => ({
@@ -870,7 +1123,7 @@ router.get('/courses', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/courses', verifyToken, async (req, res) => {
+router.post('/courses', verifyToken, requireAdmin, async (req, res) => {
   const { name, platform, progress_pct, hours_studied, notes } = req.body;
   if (!name || !platform) return res.status(400).json({ error: 'Course name and platform are required.' });
 
@@ -890,7 +1143,7 @@ router.post('/courses', verifyToken, async (req, res) => {
   }
 });
 
-router.put('/courses/:id', verifyToken, async (req, res) => {
+router.put('/courses/:id', verifyToken, requireAdmin, async (req, res) => {
   const { name, platform, progress_pct, hours_studied, notes } = req.body;
   try {
     const encName = encrypt(name, req.userKey);
@@ -909,10 +1162,625 @@ router.put('/courses/:id', verifyToken, async (req, res) => {
   }
 });
 
-router.delete('/courses/:id', verifyToken, async (req, res) => {
+router.delete('/courses/:id', verifyToken, requireAdmin, async (req, res) => {
   try {
     await runQuery('DELETE FROM courses WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
     res.json({ message: 'Course deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 10. CALORIE INTAKE & DEFICIT TRACKER ENDPOINTS (Admin Only)
+// ==========================================
+router.get('/calories/daily', verifyToken, requireAdmin, async (req, res) => {
+  const { date } = req.query;
+  const targetDate = date || new Date().toISOString().split('T')[0];
+
+  try {
+    const userRow = await getQuery('SELECT daily_calorie_target FROM users WHERE id = ?', [req.userId]);
+    const defaultTarget = userRow?.daily_calorie_target ? Number(userRow.daily_calorie_target) : 2000;
+
+    const log = await getQuery('SELECT * FROM calorie_logs WHERE user_id = ? AND date = ?', [req.userId, targetDate]);
+
+    if (!log) {
+      return res.json({
+        user_id: req.userId,
+        date: targetDate,
+        total_calories: 0,
+        calorie_target: defaultTarget,
+        deficit: defaultTarget,
+        status: 'deficit',
+        meals: [],
+        notes: ''
+      });
+    }
+
+    const totalCalories = decrypt(log.total_calories, req.userKey, 'number');
+    const calorieTarget = decrypt(log.calorie_target, req.userKey, 'number') || defaultTarget;
+    const meals = decrypt(log.meals, req.userKey, 'json') || [];
+    const notes = decrypt(log.notes, req.userKey, 'string') || '';
+    const deficit = calorieTarget - totalCalories;
+
+    res.json({
+      id: log.id,
+      user_id: req.userId,
+      date: log.date,
+      total_calories: totalCalories,
+      calorie_target: calorieTarget,
+      deficit: deficit,
+      status: deficit >= 0 ? 'deficit' : 'surplus',
+      meals,
+      notes
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/calories/log', verifyToken, requireAdmin, async (req, res) => {
+  const { date, total_calories, calorie_target, notes, meal, meals } = req.body;
+  const targetDate = date || new Date().toISOString().split('T')[0];
+
+  try {
+    const userRow = await getQuery('SELECT daily_calorie_target FROM users WHERE id = ?', [req.userId]);
+    const defaultTarget = userRow?.daily_calorie_target ? Number(userRow.daily_calorie_target) : 2000;
+    const finalTarget = calorie_target !== undefined && calorie_target !== null ? Number(calorie_target) : defaultTarget;
+
+    const existing = await getQuery('SELECT * FROM calorie_logs WHERE user_id = ? AND date = ?', [req.userId, targetDate]);
+
+    let currentTotal = existing ? decrypt(existing.total_calories, req.userKey, 'number') : 0;
+    let currentMeals = existing ? (decrypt(existing.meals, req.userKey, 'json') || []) : [];
+    let currentNotes = existing ? (decrypt(existing.notes, req.userKey, 'string') || '') : '';
+
+    if (meal) {
+      const mealItem = {
+        id: Date.now().toString(),
+        name: meal.name || 'Meal / Snack',
+        calories: Number(meal.calories) || 0,
+        time: meal.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        notes: meal.notes || ''
+      };
+      currentMeals.push(mealItem);
+      if (total_calories === undefined || total_calories === null) {
+        currentTotal += mealItem.calories;
+      }
+    }
+
+    if (meals && Array.isArray(meals)) {
+      currentMeals = meals;
+    }
+
+    if (total_calories !== undefined && total_calories !== null) {
+      currentTotal = Number(total_calories);
+    }
+
+    if (notes !== undefined && notes !== null) {
+      currentNotes = String(notes);
+    }
+
+    const encTotal = encrypt(currentTotal, req.userKey);
+    const encTarget = encrypt(finalTarget, req.userKey);
+    const encMeals = encrypt(currentMeals, req.userKey);
+    const encNotes = encrypt(currentNotes, req.userKey);
+
+    if (existing) {
+      await runQuery(
+        `UPDATE calorie_logs 
+         SET total_calories = ?, calorie_target = ?, meals = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [encTotal, encTarget, encMeals, encNotes, existing.id]
+      );
+    } else {
+      await runQuery(
+        `INSERT INTO calorie_logs (user_id, date, total_calories, calorie_target, meals, notes)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [req.userId, targetDate, encTotal, encTarget, encMeals, encNotes]
+      );
+    }
+
+    const deficit = finalTarget - currentTotal;
+    res.json({
+      message: 'Calorie log updated successfully.',
+      log: {
+        date: targetDate,
+        total_calories: currentTotal,
+        calorie_target: finalTarget,
+        deficit,
+        status: deficit >= 0 ? 'deficit' : 'surplus',
+        meals: currentMeals,
+        notes: currentNotes
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/calories/history', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const rows = await allQuery(
+      'SELECT * FROM calorie_logs WHERE user_id = ? ORDER BY date DESC LIMIT 60',
+      [req.userId]
+    );
+
+    const decrypted = rows.map(r => {
+      const total = decrypt(r.total_calories, req.userKey, 'number');
+      const target = decrypt(r.calorie_target, req.userKey, 'number') || 2000;
+      const meals = decrypt(r.meals, req.userKey, 'json') || [];
+      const notes = decrypt(r.notes, req.userKey, 'string') || '';
+      const deficit = target - total;
+
+      return {
+        id: r.id,
+        date: r.date,
+        total_calories: total,
+        calorie_target: target,
+        deficit,
+        status: deficit >= 0 ? 'deficit' : 'surplus',
+        meal_count: meals.length,
+        meals,
+        notes
+      };
+    });
+
+    res.json(decrypted);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/calories/summary', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const userRow = await getQuery('SELECT daily_calorie_target FROM users WHERE id = ?', [req.userId]);
+    const defaultTarget = userRow?.daily_calorie_target ? Number(userRow.daily_calorie_target) : 2000;
+
+    const rows = await allQuery('SELECT * FROM calorie_logs WHERE user_id = ?', [req.userId]);
+    const logMap = {};
+    rows.forEach(r => {
+      logMap[r.date] = {
+        total: decrypt(r.total_calories, req.userKey, 'number'),
+        target: decrypt(r.calorie_target, req.userKey, 'number') || defaultTarget
+      };
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayLog = logMap[todayStr] || { total: 0, target: defaultTarget };
+    const todayDeficit = todayLog.target - todayLog.total;
+
+    // 7-day trend
+    const sevenDayTrends = [];
+    let weekSumCalories = 0;
+    let weekDaysLogged = 0;
+    let weekUnderTargetCount = 0;
+    let weeklyNetDeficit = 0;
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dStr = d.toISOString().split('T')[0];
+      const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
+
+      const dayData = logMap[dStr];
+      const cal = dayData ? dayData.total : 0;
+      const tgt = dayData ? dayData.target : defaultTarget;
+      const def = tgt - cal;
+
+      if (dayData && cal > 0) {
+        weekSumCalories += cal;
+        weekDaysLogged++;
+        if (def >= 0) weekUnderTargetCount++;
+        weeklyNetDeficit += def;
+      }
+
+      sevenDayTrends.push({
+        date: dStr,
+        day: dayLabel,
+        calories: cal,
+        target: tgt,
+        deficit: def,
+        status: def >= 0 ? 'deficit' : 'surplus',
+        isLogged: !!dayData
+      });
+    }
+
+    const weeklyAvgCalories = weekDaysLogged > 0 ? Math.round(weekSumCalories / weekDaysLogged) : 0;
+    const weeklyAdherencePct = weekDaysLogged > 0 ? Math.round((weekUnderTargetCount / weekDaysLogged) * 100) : 100;
+
+    // Month stats (current month)
+    const monthPrefix = todayStr.substring(0, 7);
+    let monthSumCalories = 0;
+    let monthDaysLogged = 0;
+    let monthlyNetDeficit = 0;
+
+    Object.entries(logMap).forEach(([date, data]) => {
+      if (date.startsWith(monthPrefix) && data.total > 0) {
+        monthSumCalories += data.total;
+        monthDaysLogged++;
+        monthlyNetDeficit += (data.target - data.total);
+      }
+    });
+
+    const monthlyAvgCalories = monthDaysLogged > 0 ? Math.round(monthSumCalories / monthDaysLogged) : 0;
+    // 7700 kcal ~= 1 kg fat
+    const projectedKgFatChange = Math.round((monthlyNetDeficit / 7700) * 10) / 10;
+
+    // 4-Week Trend Analysis
+    const weeklyBreakdowns = [];
+    for (let w = 3; w >= 0; w--) {
+      const now = new Date();
+      const wEnd = new Date(now);
+      wEnd.setDate(wEnd.getDate() - (w * 7));
+      const wStart = new Date(wEnd);
+      wStart.setDate(wStart.getDate() - 6);
+
+      let wTotal = 0;
+      let wCount = 0;
+      let wDefSum = 0;
+
+      for (let cur = new Date(wStart); cur <= wEnd; cur.setDate(cur.getDate() + 1)) {
+        const cStr = cur.toISOString().split('T')[0];
+        if (logMap[cStr] && logMap[cStr].total > 0) {
+          wTotal += logMap[cStr].total;
+          wCount++;
+          wDefSum += (logMap[cStr].target - logMap[cStr].total);
+        }
+      }
+
+      const wLabel = `${wStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${wEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      weeklyBreakdowns.push({
+        weekLabel: wLabel,
+        avgCalories: wCount > 0 ? Math.round(wTotal / wCount) : 0,
+        totalCalories: wTotal,
+        netDeficit: wDefSum,
+        loggedDays: wCount,
+        isCurrentWeek: w === 0
+      });
+    }
+
+    res.json({
+      todayCalories: todayLog.total,
+      todayTarget: todayLog.target,
+      todayDeficit,
+      todayStatus: todayDeficit >= 0 ? 'deficit' : 'surplus',
+      weeklyAvgCalories,
+      weeklyNetDeficit,
+      weeklyAdherencePct,
+      monthlyAvgCalories,
+      monthlyNetDeficit,
+      projectedKgFatChange,
+      sevenDayTrends,
+      weeklyBreakdowns,
+      defaultTarget
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/calories/log/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await runQuery('DELETE FROM calorie_logs WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
+    res.json({ message: 'Calorie log entry deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 11. ADDICTION TRACKER & ANALYSIS ENDPOINTS (Admin Only)
+// ==========================================
+const DEFAULT_HABITS = [
+  { name: 'Cigarettes', category: 'substance', unit: 'cigarettes', daily_threshold: 0, cost_per_unit: 150, color: '#ef4444', icon: 'smoke_free' },
+  { name: 'Phone Screen Time', category: 'digital', unit: 'minutes', daily_threshold: 120, cost_per_unit: 0, color: '#3b82f6', icon: 'smartphone' },
+  { name: 'Overeating', category: 'behavioral', unit: 'episodes', daily_threshold: 0, cost_per_unit: 500, color: '#f59e0b', icon: 'restaurant' }
+];
+
+router.get('/addictions/habits', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    let habits = await allQuery('SELECT * FROM addiction_habits WHERE user_id = ? ORDER BY id ASC', [req.userId]);
+
+    // Seed defaults if empty
+    if (habits.length === 0) {
+      for (const h of DEFAULT_HABITS) {
+        await runQuery(
+          `INSERT INTO addiction_habits (user_id, name, category, unit, daily_threshold, cost_per_unit, color, icon)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [req.userId, h.name, h.category, h.unit, h.daily_threshold, h.cost_per_unit, h.color, h.icon]
+        );
+      }
+      habits = await allQuery('SELECT * FROM addiction_habits WHERE user_id = ? ORDER BY id ASC', [req.userId]);
+    }
+
+    res.json(habits);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/addictions/habits', verifyToken, requireAdmin, async (req, res) => {
+  const { name, category, unit, daily_threshold, cost_per_unit, color, icon } = req.body;
+  if (!name || !unit) return res.status(400).json({ error: 'Name and unit are required.' });
+
+  try {
+    const result = await runQuery(
+      `INSERT INTO addiction_habits (user_id, name, category, unit, daily_threshold, cost_per_unit, color, icon)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.userId,
+        name.trim(),
+        category || 'custom',
+        unit.trim(),
+        Number(daily_threshold) || 0,
+        Number(cost_per_unit) || 0,
+        color || '#6366f1',
+        icon || 'healing'
+      ]
+    );
+    res.status(201).json({ message: 'Habit added successfully.', habitId: result.lastID });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/addictions/habits/:id', verifyToken, requireAdmin, async (req, res) => {
+  const { name, category, unit, daily_threshold, cost_per_unit, color, icon } = req.body;
+  try {
+    await runQuery(
+      `UPDATE addiction_habits 
+       SET name = ?, category = ?, unit = ?, daily_threshold = ?, cost_per_unit = ?, color = ?, icon = ?
+       WHERE id = ? AND user_id = ?`,
+      [
+        name.trim(),
+        category,
+        unit.trim(),
+        Number(daily_threshold) || 0,
+        Number(cost_per_unit) || 0,
+        color || '#6366f1',
+        icon || 'healing',
+        req.params.id,
+        req.userId
+      ]
+    );
+    res.json({ message: 'Habit updated successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/addictions/habits/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await runQuery('DELETE FROM addiction_logs WHERE habit_id = ? AND user_id = ?', [req.params.id, req.userId]);
+    await runQuery('DELETE FROM addiction_habits WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
+    res.json({ message: 'Habit and logs deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/addictions/daily', verifyToken, requireAdmin, async (req, res) => {
+  const { date } = req.query;
+  const targetDate = date || new Date().toISOString().split('T')[0];
+
+  try {
+    const habits = await allQuery('SELECT * FROM addiction_habits WHERE user_id = ?', [req.userId]);
+
+    const logs = await allQuery(
+      'SELECT * FROM addiction_logs WHERE user_id = ? AND date = ?',
+      [req.userId, targetDate]
+    );
+
+    const logByHabit = {};
+    logs.forEach(l => {
+      logByHabit[l.habit_id] = {
+        id: l.id,
+        quantity: decrypt(l.quantity, req.userKey, 'number'),
+        trigger_context: decrypt(l.trigger_context, req.userKey, 'string') || '',
+        craving_intensity: decrypt(l.craving_intensity, req.userKey, 'number') || 1,
+        notes: decrypt(l.notes, req.userKey, 'string') || ''
+      };
+    });
+
+    const result = habits.map(h => {
+      const l = logByHabit[h.id];
+      const qty = l ? l.quantity : 0;
+      const withinThreshold = qty <= h.daily_threshold;
+      return {
+        habit_id: h.id,
+        habit_name: h.name,
+        category: h.category,
+        unit: h.unit,
+        daily_threshold: h.daily_threshold,
+        cost_per_unit: h.cost_per_unit,
+        color: h.color,
+        icon: h.icon,
+        date: targetDate,
+        log_id: l ? l.id : null,
+        quantity: qty,
+        trigger_context: l ? l.trigger_context : '',
+        craving_intensity: l ? l.craving_intensity : 1,
+        notes: l ? l.notes : '',
+        withinThreshold,
+        isLogged: !!l
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/addictions/log', verifyToken, requireAdmin, async (req, res) => {
+  const { habit_id, date, quantity, increment, trigger_context, craving_intensity, notes } = req.body;
+  if (!habit_id) return res.status(400).json({ error: 'Habit ID is required.' });
+
+  const targetDate = date || new Date().toISOString().split('T')[0];
+
+  try {
+    const existing = await getQuery(
+      'SELECT * FROM addiction_logs WHERE user_id = ? AND habit_id = ? AND date = ?',
+      [req.userId, habit_id, targetDate]
+    );
+
+    let currentQty = existing ? decrypt(existing.quantity, req.userKey, 'number') : 0;
+    let currentTrigger = existing ? (decrypt(existing.trigger_context, req.userKey, 'string') || '') : '';
+    let currentCraving = existing ? (decrypt(existing.craving_intensity, req.userKey, 'number') || 1) : 1;
+    let currentNotes = existing ? (decrypt(existing.notes, req.userKey, 'string') || '') : '';
+
+    if (increment !== undefined && increment !== null) {
+      currentQty = Math.max(0, currentQty + Number(increment));
+    } else if (quantity !== undefined && quantity !== null) {
+      currentQty = Math.max(0, Number(quantity));
+    }
+
+    if (trigger_context !== undefined) currentTrigger = trigger_context;
+    if (craving_intensity !== undefined) currentCraving = Number(craving_intensity);
+    if (notes !== undefined) currentNotes = notes;
+
+    const encQty = encrypt(currentQty, req.userKey);
+    const encTrigger = encrypt(currentTrigger, req.userKey);
+    const encCraving = encrypt(currentCraving, req.userKey);
+    const encNotes = encrypt(currentNotes, req.userKey);
+
+    if (existing) {
+      await runQuery(
+        `UPDATE addiction_logs 
+         SET quantity = ?, trigger_context = ?, craving_intensity = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [encQty, encTrigger, encCraving, encNotes, existing.id]
+      );
+    } else {
+      await runQuery(
+        `INSERT INTO addiction_logs (user_id, habit_id, date, quantity, trigger_context, craving_intensity, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [req.userId, habit_id, targetDate, encQty, encTrigger, encCraving, encNotes]
+      );
+    }
+
+    res.json({ message: 'Habit logged successfully.', quantity: currentQty });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/addictions/analysis', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const habits = await allQuery('SELECT * FROM addiction_habits WHERE user_id = ?', [req.userId]);
+    const rawLogs = await allQuery('SELECT * FROM addiction_logs WHERE user_id = ? ORDER BY date DESC', [req.userId]);
+
+    const logs = rawLogs.map(l => ({
+      id: l.id,
+      habit_id: l.habit_id,
+      date: l.date,
+      quantity: decrypt(l.quantity, req.userKey, 'number'),
+      trigger_context: decrypt(l.trigger_context, req.userKey, 'string') || '',
+      craving_intensity: decrypt(l.craving_intensity, req.userKey, 'number') || 1,
+      notes: decrypt(l.notes, req.userKey, 'string') || ''
+    }));
+
+    // Trigger analysis
+    const triggerCounts = {};
+    logs.forEach(l => {
+      if (l.trigger_context && l.quantity > 0) {
+        triggerCounts[l.trigger_context] = (triggerCounts[l.trigger_context] || 0) + 1;
+      }
+    });
+
+    const topTriggers = Object.entries(triggerCounts)
+      .map(([trigger, count]) => ({ trigger, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Per-habit analytics
+    const habitStats = habits.map(h => {
+      const hLogs = logs.filter(l => l.habit_id === h.id);
+      const logMap = {};
+      hLogs.forEach(l => { logMap[l.date] = l.quantity; });
+
+      // Streak calculation (consecutive days <= daily_threshold ending today)
+      let currentStreak = 0;
+      let checkDate = new Date();
+      while (true) {
+        const dStr = checkDate.toISOString().split('T')[0];
+        const val = logMap[dStr] !== undefined ? logMap[dStr] : 0;
+        if (val <= h.daily_threshold) {
+          currentStreak++;
+          checkDate.setDate(checkDate.getDate() - 1);
+        } else {
+          break;
+        }
+        if (currentStreak > 365) break;
+      }
+
+      // Past 7 days intake
+      const sevenDays = [];
+      let sevenDayTotal = 0;
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dStr = d.toISOString().split('T')[0];
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+        const qty = logMap[dStr] !== undefined ? logMap[dStr] : 0;
+        sevenDayTotal += qty;
+        sevenDays.push({
+          date: dStr,
+          day: dayName,
+          quantity: qty,
+          threshold: h.daily_threshold,
+          withinThreshold: qty <= h.daily_threshold
+        });
+      }
+
+      // Estimated savings (e.g. avoided units * cost)
+      let moneySaved = 0;
+      if (h.cost_per_unit > 0 && h.category === 'substance') {
+        const baseline = 10;
+        sevenDays.forEach(day => {
+          const avoided = Math.max(0, baseline - day.quantity);
+          moneySaved += avoided * h.cost_per_unit;
+        });
+      }
+
+      return {
+        habit: h,
+        currentStreak,
+        sevenDayAverage: Math.round((sevenDayTotal / 7) * 10) / 10,
+        sevenDays,
+        moneySaved,
+        totalLogsCount: hLogs.length
+      };
+    });
+
+    // Overall Habit Wellness Score (0-100)
+    let wellnessScore = 85;
+    if (habitStats.length > 0) {
+      let withinGoalCount = 0;
+      let totalChecks = 0;
+      habitStats.forEach(hs => {
+        hs.sevenDays.forEach(d => {
+          totalChecks++;
+          if (d.withinThreshold) withinGoalCount++;
+        });
+      });
+      wellnessScore = totalChecks > 0 ? Math.round((withinGoalCount / totalChecks) * 100) : 100;
+    }
+
+    res.json({
+      habitStats,
+      topTriggers,
+      wellnessScore,
+      totalHabits: habits.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/addictions/log/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await runQuery('DELETE FROM addiction_logs WHERE id = ? AND user_id = ?', [req.params.id, req.userId]);
+    res.json({ message: 'Addiction log deleted.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

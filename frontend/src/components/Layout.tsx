@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -19,8 +20,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
     clearAll,
     markAsRead,
     toast,
-    dismissToast
+    dismissToast,
+    showPermissionBanner,
+    dismissPermissionBanner
   } = useNotifications();
+
+  const { pushStatus, subscribe, isSupported: isPushSupported } = usePushNotifications();
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showMobileDropdown, setShowMobileDropdown] = useState(false);
@@ -89,11 +94,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
                   {n.type === 'attendance' && (
                     <span className="material-symbols-outlined text-primary text-sm">calendar_today</span>
                   )}
-                  {n.type === 'gym' && (
+                  {(n.type === 'gym' || n.type === 'health') && (
                     <span className="material-symbols-outlined text-tertiary text-sm">fitness_center</span>
                   )}
                   {n.type === 'projects' && (
                     <span className="material-symbols-outlined text-secondary text-sm">account_tree</span>
+                  )}
+                  {n.type === 'system' && (
+                    <span className="material-symbols-outlined text-outline text-sm">notifications</span>
                   )}
                 </div>
                 <div className="flex-1 pr-6">
@@ -135,10 +143,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
     { name: 'Dashboard', path: '/', icon: 'dashboard' },
     { name: 'Attendance', path: '/attendance', icon: 'calendar_today' },
     { name: 'Finance', path: '/finance', icon: 'payments' },
-    { name: 'Gym', path: '/gym', icon: 'fitness_center' },
-    { name: 'Skincare', path: '/skincare', icon: 'face_6' },
-    { name: 'Projects', path: '/projects', icon: 'account_tree' },
-    ...(user?.is_admin ? [{ name: 'Developer', path: '/developer', icon: 'admin_panel_settings' }] : []),
+    ...(user?.is_admin ? [
+      { name: 'Gym', path: '/gym', icon: 'fitness_center' },
+      { name: 'Calories', path: '/calories', icon: 'nutrition' },
+      { name: 'Skincare', path: '/skincare', icon: 'face_6' },
+      { name: 'Addictions', path: '/addictions', icon: 'healing' },
+      { name: 'Projects', path: '/projects', icon: 'account_tree' },
+      { name: 'Developer', path: '/developer', icon: 'admin_panel_settings' }
+    ] : []),
     { name: 'Settings', path: '/settings', icon: 'settings' }
   ];
 
@@ -154,14 +166,46 @@ export const Layout: React.FC<LayoutProps> = ({ children, title }) => {
 
   return (
     <div className="bg-background text-on-background font-body-md text-body-md antialiased min-h-screen flex flex-col md:flex-row">
+
+      {/* Push Notification Permission Banner (slides in after login like Slack/Gmail) */}
+      {showPermissionBanner && isPushSupported && pushStatus !== 'subscribed' && (
+        <div className="fixed top-0 left-0 right-0 z-[80] animate-[slideDown_0.4s_ease-out]">
+          <div className="bg-primary text-on-primary px-4 py-3 flex items-center justify-between gap-4 shadow-lg">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-on-primary/90" style={{ fontSize: '20px' }}>notifications_active</span>
+              <div>
+                <p className="text-xs font-bold leading-tight">Stay on top of your goals</p>
+                <p className="text-[10px] text-on-primary/80 leading-snug">Enable notifications for daily reminders — budget alerts, attendance warnings, and health check-ins.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={async () => { await requestPermission(); await subscribe(); }}
+                className="px-3 py-1.5 bg-white text-primary text-xs font-bold rounded-lg hover:bg-white/90 transition-colors whitespace-nowrap"
+              >
+                Enable Notifications
+              </button>
+              <button
+                onClick={dismissPermissionBanner}
+                className="text-on-primary/70 hover:text-on-primary p-1"
+                aria-label="Dismiss"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div className="fixed top-4 right-4 z-[70] w-[min(92vw,360px)]">
           <div className="bg-surface border border-outline-variant shadow-xl rounded-xl p-3 flex gap-3 items-start animate-[fadeIn_0.2s_ease-out]">
             <div className="mt-0.5">
               {toast.type === 'finance' && <span className="material-symbols-outlined text-error">payments</span>}
               {toast.type === 'attendance' && <span className="material-symbols-outlined text-primary">calendar_today</span>}
-              {toast.type === 'gym' && <span className="material-symbols-outlined text-tertiary">fitness_center</span>}
+              {(toast.type === 'gym' || toast.type === 'health') && <span className="material-symbols-outlined text-tertiary">fitness_center</span>}
               {toast.type === 'projects' && <span className="material-symbols-outlined text-secondary">account_tree</span>}
+              {toast.type === 'system' && <span className="material-symbols-outlined text-outline">notifications</span>}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-bold text-on-surface leading-tight">{toast.title}</p>

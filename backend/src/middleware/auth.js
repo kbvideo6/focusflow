@@ -15,8 +15,17 @@ export function verifyToken(req, res, next) {
     }
     req.userId = decoded.id;
     req.userKey = decoded.userKey;
+    req.isAdmin = Boolean(decoded.isAdmin);
     next();
   });
 }
 
+export function requireAdmin(req, res, next) {
+  if (!req.isAdmin) {
+    return res.status(403).json({ error: 'Access denied: Administrator privileges required.' });
+  }
+  next();
+}
+
 export { JWT_SECRET };
+
