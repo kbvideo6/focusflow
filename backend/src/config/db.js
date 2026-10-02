@@ -37,9 +37,36 @@ export async function initDatabase() {
       daily_budget_limit REAL DEFAULT 1000.0,
       attendance_target_pct REAL DEFAULT 80.0,
       is_admin INTEGER DEFAULT 0,
+      daily_calorie_target REAL DEFAULT 2000.0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // Migration: Ensure all user columns exist on legacy databases
+  try {
+    await db.runAsync('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
+  } catch (err) {}
+  try {
+    await db.runAsync('ALTER TABLE users ADD COLUMN daily_calorie_target REAL DEFAULT 2000.0');
+  } catch (err) {}
+  try {
+    await db.runAsync('ALTER TABLE users ADD COLUMN monthly_budget_limit REAL DEFAULT 30000.0');
+  } catch (err) {}
+  try {
+    await db.runAsync('ALTER TABLE users ADD COLUMN daily_budget_limit REAL DEFAULT 1000.0');
+  } catch (err) {}
+  try {
+    await db.runAsync('ALTER TABLE users ADD COLUMN attendance_target_pct REAL DEFAULT 80.0');
+  } catch (err) {}
+
+  // Auto-promote first user or admin username to is_admin = 1 if none has admin
+  try {
+    const adminCount = await db.getAsync('SELECT COUNT(*) as count FROM users WHERE is_admin = 1');
+    if (!adminCount || adminCount.count === 0) {
+      await db.runAsync('UPDATE users SET is_admin = 1 WHERE id = 1');
+      console.log('Granted default admin status to user ID 1.');
+    }
+  } catch (err) {}
 
   // Subjects table
   await db.runAsync(`
@@ -140,14 +167,66 @@ export async function initDatabase() {
     CREATE TABLE IF NOT EXISTS gym_daily_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
-      date TEXT UNIQUE NOT NULL, -- YYYY-MM-DD
+      date TEXT NOT NULL, -- YYYY-MM-DD
       visited INTEGER DEFAULT 0, -- 0 = false, 1 = true
       water_intake_ml INTEGER DEFAULT 0,
       sleep_hours REAL DEFAULT 0.0,
       workout_summary TEXT DEFAULT '',
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, date)
     )
   `);
+
+  // Migration: Ensure gym_daily_logs has UNIQUE(user_id, date) instead of global UNIQUE on date
+  try {
+    const gymTableInfo = await db.getAsync("SELECT sql FROM sqlite_master WHERE type='table' AND name='gym_daily_logs'");
+    if (gymTableInfo && gymTableInfo.sql) {
+      const sql = gymTableInfo.sql;
+      // If table has global unique constraint on date instead of composite UNIQUE(user_id, date)
+      if (sql.includes("date TEXT UNIQUE") || !sql.includes("UNIQUE(user_id, date)")) {
+        console.log("Migrating gym_daily_logs table to composite UNIQUE(user_id, date)...");
+        await db.runAsync('PRAGMA foreign_keys = OFF');
+        await db.runAsync('ALTER TABLE gym_daily_logs RENAME TO gym_daily_logs_old');
+        await db.runAsync(`
+          CREATE TABLE gym_daily_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            visited INTEGER DEFAULT 0,
+            water_intake_ml INTEGER DEFAULT 0,
+            sleep_hours REAL DEFAULT 0.0,
+            workout_summary TEXT DEFAULT '',
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, date)
+          )
+        `);
+        await db.runAsync(`
+          INSERT OR IGNORE INTO gym_daily_logs (id, user_id, date, visited, water_intake_ml, sleep_hours, workout_summary)
+          SELECT id, user_id, date, visited, water_intake_ml, sleep_hours, workout_summary FROM gym_daily_logs_old
+        `);
+        await db.runAsync('DROP TABLE gym_daily_logs_old');
+        await db.runAsync('PRAGMA foreign_keys = ON');
+        console.log("Migration of gym_daily_logs completed successfully.");
+      }
+    }
+  } catch (err) {
+    console.error("Failed migrating gym_daily_logs table:", err);
+    await db.runAsync('PRAGMA foreign_keys = ON');
+  }
+
+  // Column migrations for gym_daily_logs
+  try {
+    await db.runAsync("ALTER TABLE gym_daily_logs ADD COLUMN workout_summary TEXT DEFAULT ''");
+  } catch (err) {}
+  try {
+    await db.runAsync("ALTER TABLE gym_daily_logs ADD COLUMN sleep_hours REAL DEFAULT 0.0");
+  } catch (err) {}
+  try {
+    await db.runAsync("ALTER TABLE gym_daily_logs ADD COLUMN water_intake_ml INTEGER DEFAULT 0");
+  } catch (err) {}
+  try {
+    await db.runAsync("ALTER TABLE gym_daily_logs ADD COLUMN visited INTEGER DEFAULT 0");
+  } catch (err) {}
 
   // Workout Templates table
   await db.runAsync(`

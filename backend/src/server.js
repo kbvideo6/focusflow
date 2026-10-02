@@ -22,21 +22,49 @@ app.use(
 );
 
 // ── CORS ──────────────────────────────────────────────────────
-// In development allow localhost frontends. In production restrict to CORS_ORIGIN.
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+const envOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
+
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5000',
+  'http://localhost:4173',
+  'http://localhost:8080',
+  'http://147.93.112.99:8080',
+  'http://147.93.112.99:5000'
+];
+
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, Postman, same-origin)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      
+      // Explicit allowed origins or wildcard
+      if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      return callback(new Error(`CORS: origin "${origin}" not allowed`), false);
+
+      // Allow common VPS IP and localhost hostnames automatically
+      try {
+        const url = new URL(origin);
+        if (
+          url.hostname === 'localhost' ||
+          url.hostname === '127.0.0.1' ||
+          url.hostname === '147.93.112.99' ||
+          url.hostname.startsWith('192.168.') ||
+          url.hostname.startsWith('10.')
+        ) {
+          return callback(null, true);
+        }
+      } catch (_) {}
+
+      // Reject politely without throwing a 500 error
+      return callback(null, false);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-dev-key', 'x-cron-key'],

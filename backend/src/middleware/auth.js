@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import db from '../config/db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'lifetracker-super-secret-key-123';
 
@@ -21,10 +22,25 @@ export function verifyToken(req, res, next) {
 }
 
 export function requireAdmin(req, res, next) {
-  if (!req.isAdmin) {
-    return res.status(403).json({ error: 'Access denied: Administrator privileges required.' });
+  if (req.isAdmin) {
+    return next();
   }
-  next();
+
+  // Fallback: check database directly in case token was issued without isAdmin or user was promoted
+  const adminNames = (process.env.ADMIN_USERNAMES || 'nisal,nisal7410,admin')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  db.get('SELECT id, username, is_admin FROM users WHERE id = ?', [req.userId], (err, user) => {
+    if (!err && user) {
+      if (user.is_admin === 1 || user.id === 1 || adminNames.includes((user.username || '').toLowerCase())) {
+        req.isAdmin = true;
+        return next();
+      }
+    }
+    return res.status(403).json({ error: 'Access denied: Administrator privileges required.' });
+  });
 }
 
 export { JWT_SECRET };

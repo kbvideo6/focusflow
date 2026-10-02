@@ -838,11 +838,25 @@ router.post('/gym/daily', verifyToken, requireAdmin, async (req, res) => {
         [encVisited, encWater, encSleep, encWorkout, existing.id]
       );
     } else {
-      await runQuery(
-        `INSERT INTO gym_daily_logs (user_id, date, visited, water_intake_ml, sleep_hours, workout_summary)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [req.userId, date, encVisited, encWater, encSleep, encWorkout]
-      );
+      try {
+        await runQuery(
+          `INSERT INTO gym_daily_logs (user_id, date, visited, water_intake_ml, sleep_hours, workout_summary)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [req.userId, date, encVisited, encWater, encSleep, encWorkout]
+        );
+      } catch (insertErr) {
+        // Fallback in case of legacy tables where date has a global UNIQUE constraint
+        if (insertErr.message && insertErr.message.includes('UNIQUE constraint failed')) {
+          await runQuery(
+            `UPDATE gym_daily_logs 
+             SET user_id = ?, visited = ?, water_intake_ml = ?, sleep_hours = ?, workout_summary = ?
+             WHERE date = ?`,
+            [req.userId, encVisited, encWater, encSleep, encWorkout, date]
+          );
+        } else {
+          throw insertErr;
+        }
+      }
     }
     res.json({ message: 'Daily gym status saved successfully.' });
   } catch (err) {
@@ -945,6 +959,25 @@ router.post('/gym/logs', verifyToken, requireAdmin, async (req, res) => {
       'INSERT INTO workout_logs (user_id, date, exercise_name, sets) VALUES (?, ?, ?, ?)',
       [req.userId, date, encExName, encSets]
     );
+
+    // Auto-register attendance in daily health log for this date
+    try {
+      const existing = await getQuery('SELECT id FROM gym_daily_logs WHERE user_id = ? AND date = ?', [req.userId, date]);
+      const encVisited = encrypt(1, req.userKey);
+      if (existing) {
+        await runQuery('UPDATE gym_daily_logs SET visited = ? WHERE id = ?', [encVisited, existing.id]);
+      } else {
+        const encZero = encrypt(0, req.userKey);
+        const encEmpty = encrypt('', req.userKey);
+        await runQuery(
+          'INSERT INTO gym_daily_logs (user_id, date, visited, water_intake_ml, sleep_hours, workout_summary) VALUES (?, ?, ?, ?, ?, ?)',
+          [req.userId, date, encVisited, encZero, encZero, encEmpty]
+        );
+      }
+    } catch (e) {
+      console.error('Auto gym visited registration error:', e);
+    }
+
     res.status(201).json({ message: 'Workout logged successfully.' });
   } catch (err) {
     res.status(500).json({ error: err.message });

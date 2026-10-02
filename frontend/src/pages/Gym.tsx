@@ -36,6 +36,9 @@ export const Gym: React.FC = () => {
   const [sleepHours, setSleepHours] = useState(0.0);
   const [workoutSummary, setWorkoutSummary] = useState('');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isSavingHealth, setIsSavingHealth] = useState(false);
+  const [isSavingWorkout, setIsSavingWorkout] = useState(false);
   
   // Daily Health Logs history list
   const [dailyLogs, setDailyLogs] = useState<DailyHealthLog[]>([]);
@@ -52,11 +55,18 @@ export const Gym: React.FC = () => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>('');
   const [workoutDate, setWorkoutDate] = useState(new Date().toISOString().split('T')[0]);
   const [exerciseLogs, setExerciseLogs] = useState<Record<string, { reps: number; weight: number }[]>>({});
+  const [customExerciseInput, setCustomExerciseInput] = useState('');
 
   // Workout History states
   const [workoutLogs, setWorkoutLogs] = useState<WorkoutLog[]>([]);
 
   const dateStr = new Date().toISOString().split('T')[0];
+
+  const QUICK_EXERCISES = [
+    'Bench Press', 'Incline Dumbbell Press', 'Barbell Squat', 'Deadlift', 
+    'Pull-ups', 'Barbell Row', 'Overhead Press', 'Dumbbell Bicep Curl', 
+    'Triceps Pushdown', 'Leg Press', 'Plank', 'Push-ups'
+  ];
 
   const fetchHealthData = async () => {
     if (!token) return;
@@ -80,7 +90,7 @@ export const Gym: React.FC = () => {
         const allLogs = await allRes.json();
         setDailyLogs(allLogs);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch health log error:', err);
     }
   };
@@ -97,7 +107,7 @@ export const Gym: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (logRes.ok) setWorkoutLogs(await logRes.json());
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch gym logs error:', err);
     }
   };
@@ -110,6 +120,8 @@ export const Gym: React.FC = () => {
   // Save Health Status
   const handleSaveHealth = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
+    setIsSavingHealth(true);
     try {
       const res = await fetch(`${apiUrl}/tracker/gym/daily`, {
         method: 'POST',
@@ -129,9 +141,15 @@ export const Gym: React.FC = () => {
         setSaveSuccessMsg('Daily health check-in logged successfully!');
         setTimeout(() => setSaveSuccessMsg(''), 3500);
         fetchHealthData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setErrorMsg(errData.error || 'Failed to save health check-in.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Gym save error:', err);
+      setErrorMsg(err.message || 'Connection error saving health check-in.');
+    } finally {
+      setIsSavingHealth(false);
     }
   };
 
@@ -178,8 +196,9 @@ export const Gym: React.FC = () => {
   // Save Template
   const handleCreateTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
     if (!newTemplateName.trim() || newExercisesList.length === 0) {
-      alert('Please enter a template name and at least one exercise.');
+      setErrorMsg('Please enter a template name and at least one exercise.');
       return;
     }
 
@@ -198,33 +217,95 @@ export const Gym: React.FC = () => {
       if (res.ok) {
         setNewTemplateName('');
         setNewExercisesList([]);
-        fetchTemplatesAndLogs();
+        setSaveSuccessMsg('Template created successfully!');
+        setTimeout(() => setSaveSuccessMsg(''), 3000);
+        await fetchTemplatesAndLogs();
         setActiveTab('workout');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setErrorMsg(errData.error || 'Failed to create template.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Create template failed:', err);
+      setErrorMsg(err.message || 'Connection error creating template.');
+    }
+  };
+
+  // 1-Click Starter Templates Loader
+  const handleLoadStarterTemplates = async () => {
+    setErrorMsg('');
+    const starters = [
+      { name: 'Push Day (Chest, Shoulders, Triceps)', exercises: ['Bench Press', 'Incline Dumbbell Press', 'Overhead Shoulder Press', 'Triceps Rope Pushdown'] },
+      { name: 'Pull Day (Back, Biceps)', exercises: ['Lat Pulldown', 'Barbell Row', 'Face Pulls', 'Bicep Barbell Curl'] },
+      { name: 'Leg Day (Quads, Hamstrings, Core)', exercises: ['Barbell Squats', 'Romanian Deadlift', 'Leg Press', 'Hanging Leg Raises'] },
+      { name: 'Full Body Conditioning', exercises: ['Deadlift', 'Push-ups', 'Pull-ups', 'Dumbbell Lunges'] }
+    ];
+
+    try {
+      for (const starter of starters) {
+        await fetch(`${apiUrl}/tracker/gym/templates`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(starter)
+        });
+      }
+      setSaveSuccessMsg('Starter workout templates installed successfully!');
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      await fetchTemplatesAndLogs();
+    } catch (err: any) {
+      console.error('Load starters error:', err);
+      setErrorMsg('Failed to load starter templates.');
     }
   };
 
   // Initialize logs sets when template changes
   const handleSelectTemplate = (id: number | '') => {
     setSelectedTemplateId(id);
-    if (id === '') {
-      setExerciseLogs({});
-      return;
-    }
+    if (id === '') return;
     const template = templates.find(t => t.id === id);
     if (template) {
-      const initialLogs: Record<string, { reps: number; weight: number }[]> = {};
+      const updatedLogs: Record<string, { reps: number; weight: number }[]> = { ...exerciseLogs };
       template.exercises.forEach(ex => {
-        initialLogs[ex.name] = [
-          { reps: 10, weight: 40 },
-          { reps: 10, weight: 40 },
-          { reps: 10, weight: 40 }
-        ];
+        if (!updatedLogs[ex.name]) {
+          updatedLogs[ex.name] = [
+            { reps: 10, weight: 20 },
+            { reps: 10, weight: 20 },
+            { reps: 10, weight: 20 }
+          ];
+        }
       });
-      setExerciseLogs(initialLogs);
+      setExerciseLogs(updatedLogs);
     }
+  };
+
+  // Add custom exercise to current workout session
+  const handleAddCustomExercise = (nameToAdd?: string) => {
+    const name = (nameToAdd || customExerciseInput).trim();
+    if (!name) return;
+    setExerciseLogs(prev => {
+      if (prev[name]) return prev;
+      return {
+        ...prev,
+        [name]: [
+          { reps: 10, weight: 20 },
+          { reps: 10, weight: 20 },
+          { reps: 10, weight: 20 }
+        ]
+      };
+    });
+    if (!nameToAdd) setCustomExerciseInput('');
+  };
+
+  // Remove entire exercise from current session
+  const handleRemoveExercise = (exerciseName: string) => {
+    setExerciseLogs(prev => {
+      const copy = { ...prev };
+      delete copy[exerciseName];
+      return copy;
+    });
   };
 
   // Log set parameter update
@@ -239,35 +320,45 @@ export const Gym: React.FC = () => {
     });
   };
 
-  // Add Set
+  // Add Set to exercise
   const handleAddSet = (exerciseName: string) => {
     setExerciseLogs(prev => {
       const currentSets = [...(prev[exerciseName] || [])];
-      const lastSet = currentSets[currentSets.length - 1] || { reps: 10, weight: 40 };
+      const lastSet = currentSets[currentSets.length - 1] || { reps: 10, weight: 20 };
       currentSets.push({ ...lastSet });
       return { ...prev, [exerciseName]: currentSets };
     });
   };
 
-  // Delete Set
+  // Delete Set from exercise
   const handleRemoveSet = (exerciseName: string, setIdx: number) => {
     setExerciseLogs(prev => {
       const currentSets = [...(prev[exerciseName] || [])];
       if (currentSets.length > 1) {
         currentSets.splice(setIdx, 1);
+        return { ...prev, [exerciseName]: currentSets };
+      } else {
+        const copy = { ...prev };
+        delete copy[exerciseName];
+        return copy;
       }
-      return { ...prev, [exerciseName]: currentSets };
     });
   };
 
   // Save Session Logs
   const handleSaveWorkoutSession = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (Object.keys(exerciseLogs).length === 0) return;
+    setErrorMsg('');
+    const exercisesToSave = Object.entries(exerciseLogs).filter(([_, sets]) => sets.length > 0);
+    if (exercisesToSave.length === 0) {
+      setErrorMsg('Please add at least one exercise with sets to log your workout.');
+      return;
+    }
 
+    setIsSavingWorkout(true);
     try {
-      for (const [exName, sets] of Object.entries(exerciseLogs)) {
-        await fetch(`${apiUrl}/tracker/gym/logs`, {
+      for (const [exName, sets] of exercisesToSave) {
+        const res = await fetch(`${apiUrl}/tracker/gym/logs`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -279,15 +370,24 @@ export const Gym: React.FC = () => {
             sets
           })
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to log sets for ${exName}`);
+        }
       }
-      alert('Workout session logged successfully!');
+      setSaveSuccessMsg('Workout session logged successfully!');
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
       setSelectedTemplateId('');
       setExerciseLogs({});
-      fetchTemplatesAndLogs();
+      await fetchHealthData();
+      await fetchTemplatesAndLogs();
       setActiveTab('history');
       setHistorySubTab('workoutLogs');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Log session failed:', err);
+      setErrorMsg(err.message || 'Failed to log workout session.');
+    } finally {
+      setIsSavingWorkout(false);
     }
   };
 
@@ -469,27 +569,53 @@ export const Gym: React.FC = () => {
                 </div>
               )}
 
+              {errorMsg && (
+                <div className="mb-4 p-3 bg-error-container/20 border border-error/30 text-error text-xs rounded-lg flex items-center justify-between font-medium animate-fadeIn">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm">error</span>
+                    <span>{errorMsg}</span>
+                  </div>
+                  <button type="button" onClick={() => setErrorMsg('')} className="text-outline hover:text-on-surface">
+                    <span className="material-symbols-outlined text-xs">close</span>
+                  </button>
+                </div>
+              )}
+
               <form onSubmit={handleSaveHealth} className="space-y-6">
                 {/* Gym Visited Check-in Switch */}
-                <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
-                  <div>
-                    <p className="text-body-md font-bold text-on-surface flex items-center gap-2">
-                      <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>fitness_center</span>
-                      Gym Visited Today
-                    </p>
-                    <p className="text-xs text-outline mt-0.5">Toggle on to register your workout attendance in your history logs</p>
+                <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-body-md font-bold text-on-surface flex items-center gap-2">
+                        <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>fitness_center</span>
+                        Gym Visited Today
+                      </p>
+                      <p className="text-xs text-outline mt-0.5">Toggle on to register your workout attendance in your history logs</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setGymLogged(!gymLogged)}
+                      className={`w-14 h-7 rounded-full relative transition-colors shadow-inner flex items-center px-1 ${
+                        gymLogged ? 'bg-secondary' : 'bg-outline-variant'
+                      }`}
+                    >
+                      <span className={`w-5 h-5 bg-white rounded-full shadow-md transition-transform transform ${
+                        gymLogged ? 'translate-x-7' : 'translate-x-0'
+                      }`}></span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setGymLogged(!gymLogged)}
-                    className={`w-14 h-7 rounded-full relative transition-colors shadow-inner flex items-center px-1 ${
-                      gymLogged ? 'bg-secondary' : 'bg-outline-variant'
-                    }`}
-                  >
-                    <span className={`w-5 h-5 bg-white rounded-full shadow-md transition-transform transform ${
-                      gymLogged ? 'translate-x-7' : 'translate-x-0'
-                    }`}></span>
-                  </button>
+
+                  <div className="pt-2 border-t border-outline-variant/30 flex items-center justify-between text-xs">
+                    <span className="text-on-surface-variant font-medium">Want to log specific exercise sets, weights & reps?</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('workout')}
+                      className="text-primary hover:underline font-bold flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-sm">fitness_center</span>
+                      Log Workout Sets →
+                    </button>
+                  </div>
                 </div>
 
                 {/* Water Intake */}
@@ -562,10 +688,11 @@ export const Gym: React.FC = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-primary text-on-primary py-3.5 rounded-lg text-label-sm font-semibold hover:bg-primary/95 transition-all shadow-sm active:scale-98 flex items-center justify-center gap-2"
+                  disabled={isSavingHealth}
+                  className="w-full bg-primary text-on-primary py-3.5 rounded-lg text-label-sm font-semibold hover:bg-primary/95 transition-all shadow-sm active:scale-98 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  <span className="material-symbols-outlined text-sm">save</span>
-                  Save Health Check-in
+                  <span className="material-symbols-outlined text-sm">{isSavingHealth ? 'sync' : 'save'}</span>
+                  {isSavingHealth ? 'Saving Check-in...' : 'Save Health Check-in'}
                 </button>
               </form>
             </div>
@@ -800,78 +927,208 @@ export const Gym: React.FC = () => {
         {/* ========================================================================= */}
         {activeTab === 'workout' && (
           <div className="bg-white border border-outline-variant rounded-xl p-6 shadow-sm max-w-2xl mx-auto space-y-6">
-            <h3 className="text-stat-value font-bold text-on-background border-l-4 border-primary pl-3 mb-4">Log Gym Session</h3>
-
-            <div>
-              <label className="block text-xs font-bold text-outline uppercase tracking-wider mb-1">1. Choose Workout Template</label>
-              <select
-                value={selectedTemplateId}
-                onChange={(e) => handleSelectTemplate(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full bg-[#f8f9ff] border border-outline-variant rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:outline-none"
-              >
-                <option value="">-- Choose Template --</option>
-                {templates.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-outline-variant/30 pb-4">
+              <div>
+                <h3 className="text-stat-value font-bold text-on-background border-l-4 border-primary pl-3">Log Workout Session</h3>
+                <p className="text-xs text-on-surface-variant mt-1">Pick a template or add custom exercises with weights & reps</p>
+              </div>
+              <div>
+                <input
+                  type="date"
+                  value={workoutDate}
+                  onChange={(e) => setWorkoutDate(e.target.value)}
+                  className="bg-[#f8f9ff] border border-outline-variant rounded-lg px-3 py-1.5 text-xs font-bold text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"
+                />
+              </div>
             </div>
 
-            {selectedTemplateId !== '' && (
-              <form onSubmit={handleSaveWorkoutSession} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-outline uppercase tracking-wider mb-1">Workout Date</label>
-                  <input
-                    type="date"
-                    value={workoutDate}
-                    onChange={(e) => setWorkoutDate(e.target.value)}
-                    className="w-full bg-[#f8f9ff] border border-outline-variant rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary focus:outline-none"
-                  />
-                </div>
+            {saveSuccessMsg && (
+              <div className="p-3 bg-secondary/15 border border-secondary/30 text-secondary text-xs rounded-lg flex items-center gap-2 font-medium animate-fadeIn">
+                <span className="material-symbols-outlined text-sm">check_circle</span>
+                {saveSuccessMsg}
+              </div>
+            )}
 
-                <div className="space-y-6 border-t border-outline-variant/30 pt-6">
+            {errorMsg && (
+              <div className="p-3 bg-error-container/20 border border-error/30 text-error text-xs rounded-lg flex items-center justify-between font-medium animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-sm">error</span>
+                  <span>{errorMsg}</span>
+                </div>
+                <button type="button" onClick={() => setErrorMsg('')} className="text-outline hover:text-on-surface">
+                  <span className="material-symbols-outlined text-xs">close</span>
+                </button>
+              </div>
+            )}
+
+            {/* Template Selector & Starter Routines */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-outline uppercase tracking-wider">Choose Routine Template (Optional)</label>
+              <div className="flex gap-2">
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => handleSelectTemplate(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="flex-grow bg-[#f8f9ff] border border-outline-variant rounded-lg p-2.5 text-xs font-medium focus:ring-2 focus:ring-primary focus:outline-none"
+                >
+                  <option value="">-- Custom / No Template --</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.exercises?.length || 0} exercises)</option>
+                  ))}
+                </select>
+
+                {templates.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleLoadStarterTemplates}
+                    className="px-3 py-2 bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-1 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-sm">download</span>
+                    Load Starters
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Add Custom Exercise Bar */}
+            <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40 space-y-3">
+              <label className="block text-xs font-bold text-outline uppercase tracking-wider">Add Exercise to This Session</label>
+              
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customExerciseInput}
+                  onChange={(e) => setCustomExerciseInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCustomExercise();
+                    }
+                  }}
+                  placeholder="e.g. Incline Dumbbell Press, Bench Press, Squats..."
+                  className="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-primary focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddCustomExercise()}
+                  className="px-4 py-2 bg-primary text-on-primary rounded-lg text-xs font-bold hover:bg-primary/95 flex items-center gap-1 transition-all"
+                >
+                  <span className="material-symbols-outlined text-sm">add</span>
+                  Add Exercise
+                </button>
+              </div>
+
+              {/* Quick suggestion chips */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-outline font-semibold">Quick picks:</span>
+                {QUICK_EXERCISES.map((ex) => (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => handleAddCustomExercise(ex)}
+                    className="px-2 py-0.5 bg-white hover:bg-primary hover:text-white border border-outline-variant/40 rounded-full text-[11px] text-on-surface-variant font-medium transition-colors"
+                  >
+                    + {ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Exercise Sets Form */}
+            <form onSubmit={handleSaveWorkoutSession} className="space-y-6">
+              {Object.keys(exerciseLogs).length === 0 ? (
+                <div className="text-center py-10 px-4 bg-[#f8f9ff] border-2 border-dashed border-outline-variant/50 rounded-xl space-y-3">
+                  <span className="material-symbols-outlined text-4xl text-outline">fitness_center</span>
+                  <div>
+                    <h4 className="text-sm font-bold text-on-surface">No Exercises Added Yet</h4>
+                    <p className="text-xs text-outline mt-1">Select a template above or click any quick pick exercise chip to begin logging your workout!</p>
+                  </div>
+                  {templates.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={handleLoadStarterTemplates}
+                      className="px-4 py-2 bg-secondary text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 inline-flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-sm">bolt</span>
+                      Install 4 Starter Workout Routines
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center text-xs font-bold text-outline">
+                    <span>EXERCISES IN THIS SESSION ({Object.keys(exerciseLogs).length})</span>
+                    <button
+                      type="button"
+                      onClick={() => setExerciseLogs({})}
+                      className="text-error hover:underline font-semibold"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+
                   {Object.keys(exerciseLogs).map((exName) => (
                     <div key={exName} className="p-4 bg-[#f8f9ff] rounded-xl border border-outline-variant/30 space-y-3">
-                      <div className="flex justify-between items-center">
-                        <h4 className="font-semibold text-primary">{exName}</h4>
-                        <button
-                          type="button"
-                          onClick={() => handleAddSet(exName)}
-                          className="text-xs text-secondary hover:underline flex items-center gap-1 font-semibold"
-                        >
-                          <span className="material-symbols-outlined text-sm">add</span> Add Set
-                        </button>
+                      <div className="flex justify-between items-center border-b border-outline-variant/20 pb-2">
+                        <h4 className="font-bold text-sm text-primary flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-base">exercise</span>
+                          {exName}
+                        </h4>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleAddSet(exName)}
+                            className="text-xs text-secondary hover:underline flex items-center gap-1 font-bold"
+                          >
+                            <span className="material-symbols-outlined text-sm">add_circle</span> Add Set
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExercise(exName)}
+                            className="text-outline hover:text-error transition-colors p-1"
+                            title="Remove this exercise"
+                          >
+                            <span className="material-symbols-outlined text-base">delete</span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-2">
                         {exerciseLogs[exName].map((set, setIdx) => (
-                          <div key={setIdx} className="flex items-center gap-3 bg-white p-2 rounded border border-outline-variant/30 text-xs">
+                          <div key={setIdx} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-outline-variant/30 text-xs">
                             <span className="font-bold text-outline w-12 font-data-tabular">Set {setIdx + 1}</span>
                             <div className="flex items-center gap-2 flex-grow">
+                              <label className="text-[11px] text-outline">Weight:</label>
                               <input
                                 type="number"
+                                min="0"
+                                step="0.5"
                                 value={set.weight}
                                 onChange={(e) => handleSetChange(exName, setIdx, 'weight', Number(e.target.value))}
-                                className="w-16 bg-[#f8f9ff] border border-outline-variant rounded p-1 text-center font-data-tabular font-bold"
+                                className="w-20 bg-[#f8f9ff] border border-outline-variant rounded p-1 text-center font-data-tabular font-bold text-xs"
                                 placeholder="kg"
                                 required
                               />
-                              <span className="text-outline">kg</span>
+                              <span className="text-outline text-xs">kg</span>
                             </div>
                             <div className="flex items-center gap-2 flex-grow">
+                              <label className="text-[11px] text-outline">Reps:</label>
                               <input
                                 type="number"
+                                min="1"
+                                max="100"
                                 value={set.reps}
                                 onChange={(e) => handleSetChange(exName, setIdx, 'reps', Number(e.target.value))}
-                                className="w-16 bg-[#f8f9ff] border border-outline-variant rounded p-1 text-center font-data-tabular font-bold"
+                                className="w-16 bg-[#f8f9ff] border border-outline-variant rounded p-1 text-center font-data-tabular font-bold text-xs"
                                 placeholder="reps"
                                 required
                               />
-                              <span className="text-outline">reps</span>
+                              <span className="text-outline text-xs">reps</span>
                             </div>
                             <button
                               type="button"
                               onClick={() => handleRemoveSet(exName, setIdx)}
                               className="text-outline hover:text-error transition-colors p-1"
+                              title="Delete set"
                             >
                               <span className="material-symbols-outlined text-base">close</span>
                             </button>
@@ -880,17 +1137,18 @@ export const Gym: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                </div>
 
-                <button
-                  type="submit"
-                  className="w-full bg-secondary text-white py-3.5 rounded-lg text-label-sm font-semibold hover:opacity-95 transition-all shadow-sm active:scale-98 duration-100 flex items-center justify-center gap-2"
-                >
-                  <span className="material-symbols-outlined text-sm">fitness_center</span>
-                  Log Workout Session
-                </button>
-              </form>
-            )}
+                  <button
+                    type="submit"
+                    disabled={isSavingWorkout}
+                    className="w-full bg-secondary text-white py-3.5 rounded-lg text-label-sm font-semibold hover:opacity-95 transition-all shadow-sm active:scale-98 duration-100 flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    <span className="material-symbols-outlined text-sm">{isSavingWorkout ? 'sync' : 'fitness_center'}</span>
+                    {isSavingWorkout ? 'Saving Workout Session...' : 'Log Workout Session'}
+                  </button>
+                </div>
+              )}
+            </form>
           </div>
         )}
 
