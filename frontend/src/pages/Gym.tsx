@@ -27,7 +27,7 @@ interface DailyHealthLog {
 export const Gym: React.FC = () => {
   const { token, apiUrl } = useAuth();
   
-  const [activeTab, setActiveTab] = useState<'health' | 'analysis' | 'workout' | 'templates' | 'history'>('health');
+  const [activeTab, setActiveTab] = useState<'health' | 'analysis' | 'workout' | 'templates' | 'history' | 'schedule'>('health');
   const [historySubTab, setHistorySubTab] = useState<'healthLogs' | 'workoutLogs'>('healthLogs');
   
   // Health states
@@ -61,11 +61,139 @@ export const Gym: React.FC = () => {
   const [workoutLogs, setWorkoutLogs] = useState<WorkoutLog[]>([]);
 
   const dateStr = new Date().toISOString().split('T')[0];
+  const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
   const QUICK_EXERCISES = [
-    'Bench Press', 'Incline Dumbbell Press', 'Barbell Squat', 'Deadlift', 
-    'Pull-ups', 'Barbell Row', 'Overhead Press', 'Dumbbell Bicep Curl', 
-    'Triceps Pushdown', 'Leg Press', 'Plank', 'Push-ups'
+    'Bench Press', 'Incline Bench Press', 'Pec Fly Machine', 'Lat Pulldown',
+    'Seated Row Machine', 'Dumbbell Bicep Curl', 'Preacher Curl Machine',
+    'Leg Press', 'Leg Extension', 'Seated Leg Curl', 'Calf Raises',
+    'Pull-ups / Chin-ups', 'Push-ups', 'Dumbbell Shoulder Press',
+    'Plank', 'Battle Rope Intervals', 'EZ Bar Curl', 'Dumbbell Lunges'
+  ];
+
+  // Weekly workout schedule based on personalized PPL split
+  const WEEKLY_SCHEDULE = [
+    {
+      day: 'Saturday',
+      title: 'PUSH DAY — Chest, Shoulders & Triceps',
+      location: 'University Gym',
+      type: 'strength' as const,
+      color: '#2a14b4',
+      icon: 'fitness_center',
+      warmup: '5 min treadmill walk + 20 arm circles + 10 push-ups',
+      exercises: [
+        { name: 'Bench Press', sets: '4 × 10-12', rest: '90s', notes: 'Start light (20-30kg). Squeeze chest at top.' },
+        { name: 'Incline Bench Press', sets: '3 × 10-12', rest: '90s', notes: 'Targets upper chest. Use moderate weight.' },
+        { name: 'Pec Fly Machine', sets: '3 × 12-15', rest: '60s', notes: 'Slow & controlled. Focus on stretch.' },
+        { name: 'Dumbbell Shoulder Press', sets: '3 × 10-12', rest: '90s', notes: 'Seated. Don\'t lock out elbows.' },
+        { name: 'Dumbbell Lateral Raise', sets: '3 × 12-15', rest: '60s', notes: 'Light weight, control the negative.' },
+        { name: 'Dumbbell Tricep Kickback', sets: '3 × 12-15', rest: '60s', notes: 'Keep elbows pinned, squeeze at top.' },
+      ],
+      finisher: '10 min incline treadmill walk (fat burn zone)',
+    },
+    {
+      day: 'Sunday',
+      title: 'PULL DAY — Back & Biceps',
+      location: 'University Gym',
+      type: 'strength' as const,
+      color: '#006a61',
+      icon: 'fitness_center',
+      warmup: '5 min treadmill walk + band pull-aparts or arm swings',
+      exercises: [
+        { name: 'Lat Pulldown', sets: '4 × 10-12', rest: '90s', notes: 'Wide grip, pull to chest, squeeze lats.' },
+        { name: 'Seated Row Machine', sets: '3 × 10-12', rest: '90s', notes: 'Pull to belly button, retract shoulder blades.' },
+        { name: 'Pull-ups / Chin-ups', sets: '3 × max reps', rest: '90s', notes: 'Use chin-up machine assist if needed.' },
+        { name: 'Back Roman Hyper Machine', sets: '3 × 12-15', rest: '60s', notes: 'Strengthen lower back. Slow controlled reps.' },
+        { name: 'Preacher Curl Machine', sets: '3 × 10-12', rest: '60s', notes: 'Full range of motion, slow negative.' },
+        { name: 'EZ Bar Curl', sets: '3 × 10-12', rest: '60s', notes: 'No swinging. Strict form.' },
+      ],
+      finisher: '10 min incline treadmill walk OR 5 min battle rope intervals (20s on / 40s off)',
+    },
+    {
+      day: 'Monday',
+      title: 'LEG DAY — Quads, Hamstrings & Calves',
+      location: 'University Gym',
+      type: 'strength' as const,
+      color: '#692400',
+      icon: 'fitness_center',
+      warmup: '5 min cycling/treadmill + 20 bodyweight squats + leg swings',
+      exercises: [
+        { name: 'Squat Machine', sets: '4 × 10-12', rest: '2 min', notes: 'Full depth. Brace your core. Start with manageable weight.' },
+        { name: 'Leg Press', sets: '4 × 12-15', rest: '90s', notes: 'Feet shoulder-width, don\'t lock knees at top.' },
+        { name: 'Leg Extension Machine', sets: '3 × 12-15', rest: '60s', notes: 'Pause & squeeze quads at top for 1 second.' },
+        { name: 'Seated Leg Curl Machine', sets: '3 × 12-15', rest: '60s', notes: 'Targets hamstrings. Control the negative.' },
+        { name: 'Calf Raises Machine', sets: '4 × 15-20', rest: '45s', notes: 'Full stretch at bottom, hard squeeze at top.' },
+      ],
+      finisher: '15 min incline treadmill walk (speed 5.5, incline 8-12%)',
+    },
+    {
+      day: 'Tuesday',
+      title: 'ACTIVE RECOVERY + CARDIO',
+      location: 'Home / Gym / Outdoor',
+      type: 'cardio' as const,
+      color: '#ba1a1a',
+      icon: 'directions_run',
+      warmup: 'Light stretching 5 min',
+      exercises: [
+        { name: 'Brisk Walking / Light Jogging', sets: '20-30 min', rest: '—', notes: 'Stay in fat burn zone (heart rate 120-140 BPM). Walk outdoors or treadmill.' },
+        { name: 'Plank Hold', sets: '3 × 30-60s', rest: '30s', notes: 'Keep body straight. Squeeze abs.' },
+        { name: 'Bicycle Crunches', sets: '3 × 20 each side', rest: '30s', notes: 'Slow & controlled, don\'t yank your neck.' },
+        { name: 'Leg Raises (lying)', sets: '3 × 15', rest: '30s', notes: 'Keep lower back pressed to floor.' },
+        { name: 'Full-body Stretching', sets: '10 min', rest: '—', notes: 'Hamstrings, hip flexors, chest, shoulders, back.' },
+      ],
+      finisher: 'No extra finisher — prioritize recovery today',
+    },
+    {
+      day: 'Wednesday',
+      title: 'UPPER BODY PUSH + PULL COMBO',
+      location: 'University Gym',
+      type: 'strength' as const,
+      color: '#4f46e5',
+      icon: 'fitness_center',
+      warmup: '5 min treadmill + 15 push-ups + 10 band pull-aparts',
+      exercises: [
+        { name: 'Bench Press', sets: '3 × 8-10', rest: '90s', notes: 'Heavier than Saturday. Focus on strength.' },
+        { name: 'Lat Pulldown (close grip)', sets: '3 × 10-12', rest: '90s', notes: 'Close/neutral grip variation for inner back.' },
+        { name: 'Pec Fly Machine', sets: '3 × 12-15', rest: '60s', notes: 'Chest stretch & squeeze.' },
+        { name: 'Seated Row Machine', sets: '3 × 10-12', rest: '90s', notes: 'Focus on back squeeze.' },
+        { name: 'Dumbbell Shoulder Press', sets: '3 × 10-12', rest: '90s', notes: 'Go slightly heavier if comfortable.' },
+        { name: 'Dumbbell Bicep Curl', sets: '3 × 10-12', rest: '60s', notes: 'Alternating arms. No swing.' },
+      ],
+      finisher: '8 min battle rope intervals (20s on / 40s off) OR 10 min incline walk',
+    },
+    {
+      day: 'Thursday',
+      title: 'LEGS + CORE (Lower Body #2)',
+      location: 'University Gym',
+      type: 'strength' as const,
+      color: '#0e7490',
+      icon: 'fitness_center',
+      warmup: '5 min cycling + 15 bodyweight squats + hip circles',
+      exercises: [
+        { name: 'Angle Leg Press', sets: '4 × 12-15', rest: '90s', notes: 'Wider stance to target inner thighs too.' },
+        { name: 'Squat Machine', sets: '3 × 10-12', rest: '2 min', notes: 'Moderate weight, perfect form priority.' },
+        { name: 'Leg Extension Machine', sets: '3 × 15', rest: '60s', notes: 'Drop set on last set: do 15, reduce weight 30%, do 12 more.' },
+        { name: 'Seated Leg Curl Machine', sets: '3 × 12', rest: '60s', notes: 'Slow negatives (3 seconds down).' },
+        { name: 'Calf Raises Machine', sets: '3 × 20', rest: '45s', notes: 'Pause 2 sec at top squeeze.' },
+        { name: 'Plank Hold', sets: '3 × 45-60s', rest: '30s', notes: 'Post-legs core work. Keep breathing.' },
+      ],
+      finisher: '15 min incline treadmill walk (fat burn focus)',
+    },
+    {
+      day: 'Friday',
+      title: 'REST DAY — Full Recovery',
+      location: 'Home',
+      type: 'rest' as const,
+      color: '#6b7280',
+      icon: 'self_improvement',
+      warmup: 'Optional light walk',
+      exercises: [
+        { name: 'Full Rest or Light Walk', sets: '20-30 min', rest: '—', notes: 'Walking only. No gym. Let muscles recover and grow.' },
+        { name: 'Foam Rolling / Stretching', sets: '10-15 min', rest: '—', notes: 'Roll quads, hamstrings, back, and IT band. Stretch hip flexors.' },
+        { name: 'Meal Prep & Hydration Focus', sets: '—', rest: '—', notes: 'High protein meals. Drink 3L+ water. Sleep 8 hours tonight.' },
+      ],
+      finisher: 'Sleep early — growth happens during recovery!',
+    },
   ];
 
   const fetchHealthData = async () => {
@@ -231,14 +359,34 @@ export const Gym: React.FC = () => {
     }
   };
 
-  // 1-Click Starter Templates Loader
+  // 1-Click Starter Templates Loader — personalized PPL split for uni gym
   const handleLoadStarterTemplates = async () => {
     setErrorMsg('');
     const starters = [
-      { name: 'Push Day (Chest, Shoulders, Triceps)', exercises: ['Bench Press', 'Incline Dumbbell Press', 'Overhead Shoulder Press', 'Triceps Rope Pushdown'] },
-      { name: 'Pull Day (Back, Biceps)', exercises: ['Lat Pulldown', 'Barbell Row', 'Face Pulls', 'Bicep Barbell Curl'] },
-      { name: 'Leg Day (Quads, Hamstrings, Core)', exercises: ['Barbell Squats', 'Romanian Deadlift', 'Leg Press', 'Hanging Leg Raises'] },
-      { name: 'Full Body Conditioning', exercises: ['Deadlift', 'Push-ups', 'Pull-ups', 'Dumbbell Lunges'] }
+      { name: 'SAT — Push Day (Chest, Shoulders, Triceps)', exercises: [
+        'Bench Press', 'Incline Bench Press', 'Pec Fly Machine', 
+        'Dumbbell Shoulder Press', 'Dumbbell Lateral Raise', 'Dumbbell Tricep Kickback'
+      ]},
+      { name: 'SUN — Pull Day (Back, Biceps)', exercises: [
+        'Lat Pulldown', 'Seated Row Machine', 'Pull-ups / Chin-ups', 
+        'Back Roman Hyper Machine', 'Preacher Curl Machine', 'EZ Bar Curl'
+      ]},
+      { name: 'MON — Leg Day (Quads, Hamstrings, Calves)', exercises: [
+        'Squat Machine', 'Leg Press', 'Leg Extension Machine', 
+        'Seated Leg Curl Machine', 'Calf Raises Machine'
+      ]},
+      { name: 'WED — Upper Push+Pull Combo', exercises: [
+        'Bench Press', 'Lat Pulldown (close grip)', 'Pec Fly Machine', 
+        'Seated Row Machine', 'Dumbbell Shoulder Press', 'Dumbbell Bicep Curl'
+      ]},
+      { name: 'THU — Legs + Core #2', exercises: [
+        'Angle Leg Press', 'Squat Machine', 'Leg Extension Machine',
+        'Seated Leg Curl Machine', 'Calf Raises Machine', 'Plank Hold'
+      ]},
+      { name: 'TUE — Active Recovery + Cardio (Home/Gym)', exercises: [
+        'Brisk Walking / Light Jogging', 'Plank Hold', 'Bicycle Crunches',
+        'Leg Raises (lying)', 'Full-body Stretching'
+      ]},
     ];
 
     try {
@@ -252,8 +400,8 @@ export const Gym: React.FC = () => {
           body: JSON.stringify(starter)
         });
       }
-      setSaveSuccessMsg('Starter workout templates installed successfully!');
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      setSaveSuccessMsg('Your personalized workout routine templates have been installed! 💪');
+      setTimeout(() => setSaveSuccessMsg(''), 5000);
       await fetchTemplatesAndLogs();
     } catch (err: any) {
       console.error('Load starters error:', err);
@@ -391,6 +539,22 @@ export const Gym: React.FC = () => {
     }
   };
 
+  // Quick load workout from schedule day
+  const handleStartScheduleWorkout = (schedDay: (typeof WEEKLY_SCHEDULE)[0]) => {
+    const updated: Record<string, { reps: number; weight: number }[]> = {};
+    schedDay.exercises.forEach(ex => {
+      updated[ex.name] = [
+        { reps: 10, weight: 20 },
+        { reps: 10, weight: 20 },
+        { reps: 10, weight: 20 }
+      ];
+    });
+    setExerciseLogs(updated);
+    setWorkoutSummary(`${schedDay.title} (${schedDay.location})`);
+    setActiveTab('workout');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Filtered Daily Health Logs
   const filteredDailyLogs = useMemo(() => {
     return dailyLogs.filter(log => {
@@ -506,9 +670,18 @@ export const Gym: React.FC = () => {
           {/* Sub Navigation Tabs */}
           <div className="flex bg-surface-container rounded-full p-1 border border-outline-variant shadow-sm w-fit self-end flex-wrap gap-1">
             <button
+              onClick={() => setActiveTab('schedule')}
+              className={`px-4 py-2 rounded-full text-label-sm font-semibold transition-all flex items-center gap-1.5 ${
+                activeTab === 'schedule' ? 'bg-primary text-white shadow-sm font-bold' : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">calendar_month</span>
+              Weekly Schedule
+            </button>
+            <button
               onClick={() => setActiveTab('health')}
               className={`px-4 py-2 rounded-full text-label-sm font-semibold transition-all ${
-                activeTab === 'health' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'
+                activeTab === 'health' ? 'bg-white shadow-sm text-primary font-bold' : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
               Daily Health
@@ -516,7 +689,7 @@ export const Gym: React.FC = () => {
             <button
               onClick={() => setActiveTab('analysis')}
               className={`px-4 py-2 rounded-full text-label-sm font-semibold transition-all flex items-center gap-1.5 ${
-                activeTab === 'analysis' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'
+                activeTab === 'analysis' ? 'bg-white shadow-sm text-primary font-bold' : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
               <span className="material-symbols-outlined text-[16px]">insights</span>
@@ -525,7 +698,7 @@ export const Gym: React.FC = () => {
             <button
               onClick={() => setActiveTab('workout')}
               className={`px-4 py-2 rounded-full text-label-sm font-semibold transition-all ${
-                activeTab === 'workout' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'
+                activeTab === 'workout' ? 'bg-white shadow-sm text-primary font-bold' : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
               Log Workout
@@ -533,7 +706,7 @@ export const Gym: React.FC = () => {
             <button
               onClick={() => setActiveTab('templates')}
               className={`px-4 py-2 rounded-full text-label-sm font-semibold transition-all ${
-                activeTab === 'templates' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'
+                activeTab === 'templates' ? 'bg-white shadow-sm text-primary font-bold' : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
               Templates
@@ -541,13 +714,249 @@ export const Gym: React.FC = () => {
             <button
               onClick={() => setActiveTab('history')}
               className={`px-4 py-2 rounded-full text-label-sm font-semibold transition-all ${
-                activeTab === 'history' ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'
+                activeTab === 'history' ? 'bg-white shadow-sm text-primary font-bold' : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
               Logs History
             </button>
           </div>
         </div>
+
+        {/* ========================================================================= */}
+        {/* Tab 0: Personalized Weekly Workout Schedule & Plan */}
+        {/* ========================================================================= */}
+        {activeTab === 'schedule' && (
+          <div className="space-y-6">
+            {/* Today's Workout Focus Hero Card */}
+            {(() => {
+              const todayWorkout = WEEKLY_SCHEDULE.find(
+                s => s.day.toLowerCase() === todayDayName.toLowerCase()
+              ) || WEEKLY_SCHEDULE[0];
+              const isRest = todayWorkout.type === 'rest';
+
+              return (
+                <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-surface-container border-2 border-primary/30 rounded-2xl p-6 shadow-sm">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 bg-primary text-white text-xs font-bold rounded-full uppercase tracking-wider animate-pulse">
+                          Today's Mission
+                        </span>
+                        <span className="text-xs font-semibold text-on-surface-variant">
+                          {todayWorkout.day} • {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                        <span className="px-2 py-0.5 bg-secondary/10 text-secondary text-xs font-medium rounded-full border border-secondary/20">
+                          📍 {todayWorkout.location}
+                        </span>
+                      </div>
+                      <h2 className="text-xl md:text-2xl font-bold text-on-background">
+                        {todayWorkout.title}
+                      </h2>
+                      <p className="text-xs text-on-surface-variant flex items-center gap-1">
+                        <span className="material-symbols-outlined text-sm text-primary">fitness_center</span>
+                        <strong>Warm-up:</strong> {todayWorkout.warmup}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {!isRest && (
+                        <button
+                          type="button"
+                          onClick={() => handleStartScheduleWorkout(todayWorkout)}
+                          className="px-5 py-2.5 bg-primary hover:bg-primary-hover text-white text-sm font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2"
+                        >
+                          <span className="material-symbols-outlined text-lg">play_arrow</span>
+                          Log Today's Workout
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleLoadStarterTemplates}
+                        className="px-4 py-2.5 bg-surface hover:bg-surface-container text-on-surface text-xs font-semibold rounded-xl border border-outline-variant transition-all flex items-center gap-1.5"
+                        title="Install full weekly schedule as reusable workout templates"
+                      >
+                        <span className="material-symbols-outlined text-sm text-secondary">download</span>
+                        Sync Templates
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Today's Quick Exercise Preview */}
+                  <div className="mt-4 pt-4 border-t border-outline-variant/40">
+                    <div className="text-xs font-bold text-outline uppercase tracking-wider mb-2">
+                      Today's Exercises:
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {todayWorkout.exercises.map((ex, i) => (
+                        <div key={i} className="p-2.5 bg-white rounded-lg border border-outline-variant/30 text-xs">
+                          <div className="font-semibold text-on-background flex justify-between">
+                            <span>{ex.name}</span>
+                            <span className="text-primary font-bold">{ex.sets}</span>
+                          </div>
+                          <div className="text-[11px] text-outline mt-0.5">{ex.notes}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {todayWorkout.finisher && (
+                      <div className="mt-3 p-2.5 bg-secondary/10 border border-secondary/20 rounded-lg text-xs text-secondary font-medium flex items-center gap-2">
+                        <span className="material-symbols-outlined text-sm">local_fire_department</span>
+                        <span><strong>Fat-Burn Finisher:</strong> {todayWorkout.finisher}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Strategic Fat Loss & Muscle Gain Guidelines */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-white border border-outline-variant/40 rounded-xl shadow-xs">
+                <div className="flex items-center gap-2 text-primary font-bold text-sm mb-1">
+                  <span className="material-symbols-outlined text-lg">accessibility_new</span>
+                  Tackling Belly & Chest Fat
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  Spot reduction is a myth, but building <strong>chest muscle</strong> creates firm tissue underneath chest fat, while building <strong>wide lats</strong> creates a V-taper that visually narrows love handles.
+                </p>
+              </div>
+
+              <div className="p-4 bg-white border border-outline-variant/40 rounded-xl shadow-xs">
+                <div className="flex items-center gap-2 text-secondary font-bold text-sm mb-1">
+                  <span className="material-symbols-outlined text-lg">trending_up</span>
+                  Post-Workout Incline Walking
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  Finish sessions with <strong>10-15 min of incline treadmill walking (10-12% incline at 5.0 km/h)</strong>. This taps directly into visceral fat stores without breaking down muscle like sprinting does.
+                </p>
+              </div>
+
+              <div className="p-4 bg-white border border-outline-variant/40 rounded-xl shadow-xs">
+                <div className="flex items-center gap-2 text-tertiary font-bold text-sm mb-1">
+                  <span className="material-symbols-outlined text-lg">restaurant</span>
+                  Calorie Deficit & Protein
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  At 80kg, aim for <strong>140-160g protein daily</strong> and a ~400 kcal deficit. Drink <strong>3.0L water</strong> daily and prioritize 7.5+ hours of sleep to keep cortisol from storing belly fat.
+                </p>
+              </div>
+            </div>
+
+            {/* 7-Day Complete Weekly Split Cards */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-on-background">Full 7-Day University Gym & Home Schedule</h3>
+                  <p className="text-xs text-on-surface-variant">Tailored to your equipment: machines, dumbbells, barbells, and bodyweight.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLoadStarterTemplates}
+                  className="px-3 py-1.5 bg-secondary/15 hover:bg-secondary/25 text-secondary text-xs font-bold rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-sm">install_mobile</span>
+                  Install All 6 Routines
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {WEEKLY_SCHEDULE.map((s, idx) => {
+                  const isCurrentDay = s.day.toLowerCase() === todayDayName.toLowerCase();
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`rounded-2xl p-5 border transition-all ${
+                        isCurrentDay
+                          ? 'bg-white border-2 border-primary shadow-md ring-2 ring-primary/20'
+                          : 'bg-white border-outline-variant/50 hover:border-outline-variant shadow-xs'
+                      }`}
+                    >
+                      {/* Card Header */}
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-primary tracking-wide uppercase">
+                              {s.day}
+                            </span>
+                            {isCurrentDay && (
+                              <span className="px-2 py-0.5 bg-primary text-white text-[10px] font-black rounded-full uppercase">
+                                Today
+                              </span>
+                            )}
+                            <span className="text-[11px] px-2 py-0.5 bg-surface-container rounded-md text-outline font-medium">
+                              📍 {s.location}
+                            </span>
+                          </div>
+                          <h4 className="text-base font-bold text-on-background mt-1">
+                            {s.title}
+                          </h4>
+                        </div>
+
+                        {s.type !== 'rest' && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartScheduleWorkout(s)}
+                            className="px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0"
+                            title="Load exercises into workout logger"
+                          >
+                            <span className="material-symbols-outlined text-sm">edit_note</span>
+                            Log Workout
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Warm-up */}
+                      <div className="text-[11px] text-outline mb-3 bg-surface-container/60 p-2 rounded-lg flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-xs text-primary">alarm</span>
+                        <span><strong>Warm-up:</strong> {s.warmup}</span>
+                      </div>
+
+                      {/* Exercises */}
+                      <div className="space-y-2 mb-3">
+                        {s.exercises.map((ex, eIdx) => (
+                          <div
+                            key={eIdx}
+                            className="p-2.5 rounded-lg bg-surface-container/30 border border-outline-variant/20 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs"
+                          >
+                            <div>
+                              <div className="font-semibold text-on-background flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center">
+                                  {eIdx + 1}
+                                </span>
+                                {ex.name}
+                              </div>
+                              <div className="text-[11px] text-on-surface-variant/80 pl-5.5">
+                                {ex.notes}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                              <span className="px-2 py-0.5 bg-white border border-outline-variant/30 rounded text-primary font-bold font-data-tabular">
+                                {ex.sets}
+                              </span>
+                              {ex.rest !== '—' && (
+                                <span className="text-[10px] text-outline font-data-tabular">
+                                  rest {ex.rest}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Finisher */}
+                      {s.finisher && (
+                        <div className="p-2 bg-secondary/10 border border-secondary/20 rounded-lg text-[11px] text-secondary font-medium flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-xs">local_fire_department</span>
+                          <span><strong>Finisher:</strong> {s.finisher}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ========================================================================= */}
         {/* Tab 1: Daily Health Check-in & Immediate Check-in Logs List */}
