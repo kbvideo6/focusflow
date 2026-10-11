@@ -216,30 +216,56 @@ router.get('/subjects', verifyToken, async (req, res) => {
         else if (log.status === 'cancelled') cancelled++;
       });
 
-      const totalClasses = present + absent; // Medical and cancelled don't count in denominator
-      const percentage = totalClasses > 0 ? Math.round((present / totalClasses) * 100) : 100;
+      const MAX_CLASSES_PER_COURSE = 14;
+      const conducted = present + absent; // Classes actually held and graded for attendance
+      const percentage = conducted > 0 ? Math.round((present / conducted) * 100) : 100;
       
+      // If any classes were cancelled by lecturer, total classes held in semester is reduced
+      const totalCourseClasses = Math.max(conducted, MAX_CLASSES_PER_COURSE - cancelled);
+      const remainingClasses = Math.max(0, totalCourseClasses - conducted);
+
       const target = decSub.attendance_target || globalTarget;
+      const targetFrac = target / 100;
+
+      // Minimum total classes student must attend across the entire 14-class course to meet target
+      const minRequiredPresent = Math.ceil(totalCourseClasses * targetFrac);
+      // Maximum allowed absences for the whole course
+      const maxAllowedAbsences = Math.max(0, totalCourseClasses - minRequiredPresent);
+      // Skips remaining
+      const skipsRemaining = maxAllowedAbsences - absent;
+      // Maximum possible attendance if student attends ALL remaining classes
+      const maxPossiblePresent = present + remainingClasses;
+      const maxPossiblePct = totalCourseClasses > 0 ? Math.round((maxPossiblePresent / totalCourseClasses) * 100) : 100;
+
       let safetyStatus = 'SAFE';
       let msg = '';
 
       if (decSub.attendance_target_required) {
-        if (percentage < target) {
+        if (skipsRemaining < 0 || maxPossiblePct < target) {
+          // Student has missed more classes than mathematically allowed for target
           safetyStatus = 'CRITICAL';
-          const targetFrac = target / 100;
-          const x = Math.ceil((totalClasses * targetFrac - present) / (1 - targetFrac));
-          msg = `Must attend next ${x > 0 ? x : 1} class(es)`;
+          msg = `Debarment alert! Max final is ${maxPossiblePct}% (Missed ${absent}/${maxAllowedAbsences} max allowed)`;
+        } else if (skipsRemaining === 0) {
+          // Zero skips left!
+          if (remainingClasses > 0) {
+            safetyStatus = percentage < target ? 'CRITICAL' : 'CAUTION';
+            msg = `0 skips left! Must attend all ${remainingClasses} remaining class(es)`;
+          } else {
+            safetyStatus = present >= minRequiredPresent ? 'SAFE' : 'CRITICAL';
+            msg = present >= minRequiredPresent 
+              ? `Course finished: Target achieved (${present}/${totalCourseClasses})` 
+              : `Course finished: Below target (${present}/${totalCourseClasses})`;
+          }
         } else {
-          const targetFrac = target / 100;
-          const maxSkip = Math.floor(present / targetFrac - totalClasses);
-          const skip = maxSkip >= 0 ? maxSkip : 0;
-          
-          if (skip === 0) {
+          // Skips available (skipsRemaining > 0)
+          if (percentage < target) {
+            // Currently below target, but can recover
+            const x = Math.ceil((conducted * targetFrac - present) / (1 - targetFrac));
             safetyStatus = 'CAUTION';
-            msg = 'At threshold. Cannot skip.';
+            msg = `Attend next ${x > 0 ? x : 1} class(es) to recover target (${skipsRemaining} skip(s) left)`;
           } else {
             safetyStatus = 'SAFE';
-            msg = `Safe to skip ${skip} class(es)`;
+            msg = `Safe to skip ${skipsRemaining} class(es) (${remainingClasses} remaining of 14)`;
           }
         }
       } else {
@@ -254,6 +280,12 @@ router.get('/subjects', verifyToken, async (req, res) => {
         medical_count: medical,
         cancelled_count: cancelled,
         percentage,
+        total_course_classes: totalCourseClasses,
+        conducted_classes: conducted,
+        remaining_classes: remainingClasses,
+        min_required_present: minRequiredPresent,
+        max_allowed_absences: maxAllowedAbsences,
+        skips_remaining: skipsRemaining,
         safetyStatus,
         message: msg
       });

@@ -16,6 +16,12 @@ interface Subject {
   medical_count: number;
   cancelled_count?: number;
   percentage: number;
+  total_course_classes?: number;
+  conducted_classes?: number;
+  remaining_classes?: number;
+  min_required_present?: number;
+  max_allowed_absences?: number;
+  skips_remaining?: number;
   safetyStatus: string;
   message: string;
 }
@@ -872,6 +878,19 @@ export const Attendance: React.FC = () => {
           </form>
         </div>
 
+        {/* Semester 14-Class Policy Banner */}
+        <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-primary font-semibold">
+            <span className="material-symbols-outlined text-base">school</span>
+            <span><strong>Course Attendance Policy:</strong> Maximum <strong>14 classes per course</strong>.</span>
+          </div>
+          <div className="flex items-center gap-4 text-on-surface-variant font-medium">
+            <span>Target: <strong>80%</strong></span>
+            <span>Min Attended: <strong>≥12 classes</strong></span>
+            <span className="text-secondary font-bold bg-white px-2 py-0.5 rounded border border-outline-variant/40">Max 2 Absences Allowed</span>
+          </div>
+        </div>
+
         {/* Bento Grid Layout for Courses */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
           {subjects.length === 0 ? (
@@ -951,14 +970,48 @@ export const Attendance: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="mt-auto pt-4 border-t border-outline-variant/50 flex flex-col gap-1.5 text-xs text-on-surface-variant">
+                  <div className="mt-auto pt-3 border-t border-outline-variant/50 flex flex-col gap-2 text-xs text-on-surface-variant">
+                    {/* 14-Class Semester Runway Bar */}
+                    <div className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/30">
+                      <div className="flex justify-between items-center text-[11px] mb-1">
+                        <span className="font-semibold text-on-surface flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px] text-primary">school</span>
+                          Course Progress:
+                        </span>
+                        <span className="font-data-tabular font-bold text-primary">
+                          {sub.conducted_classes ?? (sub.present_count + sub.absent_count)} / {sub.total_course_classes ?? 14} Held
+                        </span>
+                      </div>
+                      <div className="w-full bg-surface-container rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className="bg-primary h-full rounded-full transition-all"
+                          style={{ width: `${Math.min(100, Math.round(((sub.conducted_classes ?? (sub.present_count + sub.absent_count)) / (sub.total_course_classes ?? 14)) * 100))}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] text-outline mt-1 font-medium">
+                        <span>Min required: {sub.min_required_present ?? 12}</span>
+                        <span className={
+                          (sub.skips_remaining ?? (2 - sub.absent_count)) < 0 
+                            ? 'text-error font-bold' 
+                            : (sub.skips_remaining ?? (2 - sub.absent_count)) === 0 
+                            ? 'text-tertiary font-bold' 
+                            : 'text-secondary font-bold'
+                        }>
+                          {(sub.skips_remaining ?? (2 - sub.absent_count)) < 0
+                            ? '⚠️ Over limit'
+                            : `${sub.skips_remaining ?? (2 - sub.absent_count)} skip(s) left`}
+                        </span>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-y-1 gap-x-2 font-medium">
                       <div>Present: <strong className="text-on-surface">{sub.present_count}</strong></div>
                       <div>Absent: <strong className="text-on-surface">{sub.absent_count}</strong></div>
                       <div>Medical: <strong className="text-on-surface">{sub.medical_count}</strong></div>
                       <div>Cancelled: <strong className="text-on-surface">{sub.cancelled_count || 0}</strong></div>
                     </div>
-                    <p className={`flex items-center font-medium mt-1 ${
+
+                    <p className={`flex items-center font-medium mt-0.5 ${
                       sub.safetyStatus === 'CRITICAL' ? 'text-error' : sub.safetyStatus === 'CAUTION' ? 'text-tertiary' : 'text-secondary'
                     }`}>
                       <span className="material-symbols-outlined text-sm mr-1">
@@ -1456,6 +1509,7 @@ export const Attendance: React.FC = () => {
                     <tr className="bg-surface-bright text-xs text-outline border-b border-outline-variant uppercase tracking-wider">
                       <th className="p-4 font-bold">Course Subject</th>
                       <th className="p-4 font-bold">Priority / Effort</th>
+                      <th className="p-4 font-bold">Held (Max 14)</th>
                       <th className="p-4 font-bold">Attendance %</th>
                       <th className="p-4 font-bold">Runway / Debarment Status</th>
                       <th className="p-4 font-bold">Current Marks (%)</th>
@@ -1475,6 +1529,12 @@ export const Attendance: React.FC = () => {
                             <span className="text-[11px] font-semibold text-outline">
                               {s.priority} / {s.effort_needed}
                             </span>
+                          </td>
+                          <td className="p-4 font-data-tabular">
+                            <span className="font-bold text-on-surface">
+                              {s.conducted_classes ?? (s.present_count + s.absent_count)}
+                            </span>
+                            <span className="text-xs text-outline"> / {s.total_course_classes ?? 14}</span>
                           </td>
                           <td className="p-4 font-data-tabular">
                             <span className={`font-bold ${s.percentage >= (s.attendance_target || 80) ? 'text-secondary' : 'text-error'}`}>
@@ -1708,9 +1768,51 @@ export const Attendance: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-surface-container-low rounded-xl p-4 border border-outline-variant/60">
-                  <p className="text-xs text-outline font-bold uppercase tracking-wider mb-2">Metrics Summary</p>
-                  <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-xs text-on-surface-variant font-medium">
+                <div className="bg-surface-container-low rounded-xl p-4 border border-outline-variant/60 space-y-3">
+                  <div className="flex justify-between items-center border-b border-outline-variant/40 pb-2">
+                    <p className="text-xs text-primary font-bold uppercase tracking-wider flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">school</span>
+                      14-Class Semester Runway
+                    </p>
+                    <span className="text-[11px] font-bold text-outline">
+                      {selectedSubject.conducted_classes ?? (selectedSubject.present_count + selectedSubject.absent_count)} / {selectedSubject.total_course_classes ?? 14} Lectures Held
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white p-2 rounded-lg border border-outline-variant/30 text-center">
+                      <div className="text-[10px] text-outline uppercase font-semibold">Held</div>
+                      <div className="font-bold text-on-surface font-data-tabular">
+                        {selectedSubject.conducted_classes ?? (selectedSubject.present_count + selectedSubject.absent_count)}
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-outline-variant/30 text-center">
+                      <div className="text-[10px] text-outline uppercase font-semibold">Remaining</div>
+                      <div className="font-bold text-primary font-data-tabular">
+                        {selectedSubject.remaining_classes ?? Math.max(0, 14 - (selectedSubject.present_count + selectedSubject.absent_count))}
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-outline-variant/30 text-center">
+                      <div className="text-[10px] text-outline uppercase font-semibold">Min Needed</div>
+                      <div className="font-bold text-secondary font-data-tabular">
+                        {selectedSubject.min_required_present ?? 12} / 14
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-outline-variant/30 text-center">
+                      <div className="text-[10px] text-outline uppercase font-semibold">Skips Left</div>
+                      <div className={`font-bold font-data-tabular ${
+                        (selectedSubject.skips_remaining ?? (2 - selectedSubject.absent_count)) < 0
+                          ? 'text-error'
+                          : (selectedSubject.skips_remaining ?? (2 - selectedSubject.absent_count)) === 0
+                          ? 'text-tertiary'
+                          : 'text-secondary'
+                      }`}>
+                        {selectedSubject.skips_remaining ?? (2 - selectedSubject.absent_count)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-xs text-on-surface-variant font-medium pt-1 border-t border-outline-variant/30">
                     <div>Present: <strong className="text-on-surface">{selectedSubject.present_count}</strong></div>
                     <div>Absent: <strong className="text-on-surface">{selectedSubject.absent_count}</strong></div>
                     <div>Medical: <strong className="text-on-surface">{selectedSubject.medical_count}</strong></div>
