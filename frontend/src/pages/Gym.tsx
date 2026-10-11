@@ -64,135 +64,122 @@ export const Gym: React.FC = () => {
   const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
   const QUICK_EXERCISES = [
-    'Bench Press', 'Incline Bench Press', 'Pec Fly Machine', 'Lat Pulldown',
-    'Seated Row Machine', 'Dumbbell Bicep Curl', 'Preacher Curl Machine',
-    'Leg Press', 'Leg Extension', 'Seated Leg Curl', 'Calf Raises',
-    'Pull-ups / Chin-ups', 'Push-ups', 'Dumbbell Shoulder Press',
-    'Plank', 'Battle Rope Intervals', 'EZ Bar Curl', 'Dumbbell Lunges'
+    'Bench Press',
+    'Incline Bench Press',
+    'Lat Pulldown',
+    'Seated Row Machine',
+    'Pec Fly Machine',
+    'Leg Press',
+    'Angle Leg Press',
+    'Leg Extension Machine',
+    'Seated Leg Curl Machine',
+    'Treadmill Incline Walk'
   ];
 
-  // Weekly workout schedule based on personalized PPL split
+  // 4-Day Upper / Lower Split (Tailored exclusively to familiar exercises with zero learning curve)
   const WEEKLY_SCHEDULE = [
     {
       day: 'Saturday',
-      title: 'PUSH DAY — Chest, Shoulders & Triceps',
+      title: 'UPPER BODY A — Chest & Back Power',
       location: 'University Gym',
       type: 'strength' as const,
       color: '#2a14b4',
       icon: 'fitness_center',
-      warmup: '5 min treadmill walk + 20 arm circles + 10 push-ups',
+      warmup: '5 min treadmill walk + light arm swings',
       exercises: [
-        { name: 'Bench Press', sets: '4 × 10-12', rest: '90s', notes: 'Start light (20-30kg). Squeeze chest at top.' },
-        { name: 'Incline Bench Press', sets: '3 × 10-12', rest: '90s', notes: 'Targets upper chest. Use moderate weight.' },
-        { name: 'Pec Fly Machine', sets: '3 × 12-15', rest: '60s', notes: 'Slow & controlled. Focus on stretch.' },
-        { name: 'Dumbbell Shoulder Press', sets: '3 × 10-12', rest: '90s', notes: 'Seated. Don\'t lock out elbows.' },
-        { name: 'Dumbbell Lateral Raise', sets: '3 × 12-15', rest: '60s', notes: 'Light weight, control the negative.' },
-        { name: 'Dumbbell Tricep Kickback', sets: '3 × 12-15', rest: '60s', notes: 'Keep elbows pinned, squeeze at top.' },
+        { name: 'Bench Press', sets: '4 × 8-10', rest: '90s', notes: 'Flat barbell/dumbbell press. Squeeze chest at the top.' },
+        { name: 'Lat Pulldown', sets: '4 × 10-12', rest: '90s', notes: 'Wide grip. Pull down to upper chest, squeeze lats.' },
+        { name: 'Incline Bench Press', sets: '3 × 10-12', rest: '90s', notes: 'Upper chest focus. Controlled negative on the way down.' },
+        { name: 'Seated Row Machine', sets: '3 × 10-12', rest: '75s', notes: 'Pull into lower ribs, squeeze shoulder blades together.' },
+        { name: 'Pec Fly Machine', sets: '3 × 12-15', rest: '60s', notes: 'Deep chest stretch, hold the squeeze for 1 second.' },
       ],
-      finisher: '10 min incline treadmill walk (fat burn zone)',
+      finisher: '12-15 min Treadmill Incline Walk (10-12% incline at 5.0 km/h - fat burning zone)',
     },
     {
       day: 'Sunday',
-      title: 'PULL DAY — Back & Biceps',
+      title: 'LOWER BODY A — Quads & Hamstrings Power',
       location: 'University Gym',
       type: 'strength' as const,
       color: '#006a61',
       icon: 'fitness_center',
-      warmup: '5 min treadmill walk + band pull-aparts or arm swings',
+      warmup: '5 min treadmill walk + 15 bodyweight squats',
       exercises: [
-        { name: 'Lat Pulldown', sets: '4 × 10-12', rest: '90s', notes: 'Wide grip, pull to chest, squeeze lats.' },
-        { name: 'Seated Row Machine', sets: '3 × 10-12', rest: '90s', notes: 'Pull to belly button, retract shoulder blades.' },
-        { name: 'Pull-ups / Chin-ups', sets: '3 × max reps', rest: '90s', notes: 'Use chin-up machine assist if needed.' },
-        { name: 'Back Roman Hyper Machine', sets: '3 × 12-15', rest: '60s', notes: 'Strengthen lower back. Slow controlled reps.' },
-        { name: 'Preacher Curl Machine', sets: '3 × 10-12', rest: '60s', notes: 'Full range of motion, slow negative.' },
-        { name: 'EZ Bar Curl', sets: '3 × 10-12', rest: '60s', notes: 'No swinging. Strict form.' },
+        { name: 'Leg Press', sets: '4 × 10-12', rest: '90s', notes: 'Feet shoulder-width. Lower deep, push through heels. Don\'t lock knees.' },
+        { name: 'Leg Extension Machine', sets: '4 × 12-15', rest: '60s', notes: 'Quad focus. Pause 1 second at top extension.' },
+        { name: 'Seated Leg Curl Machine', sets: '4 × 10-12', rest: '60s', notes: 'Hamstrings focus. Slow 2-3 second return.' },
       ],
-      finisher: '10 min incline treadmill walk OR 5 min battle rope intervals (20s on / 40s off)',
+      finisher: '15 min Treadmill Incline Walk (10-12% incline at 5.0 km/h)',
     },
     {
       day: 'Monday',
-      title: 'LEG DAY — Quads, Hamstrings & Calves',
-      location: 'University Gym',
-      type: 'strength' as const,
-      color: '#692400',
-      icon: 'fitness_center',
-      warmup: '5 min cycling/treadmill + 20 bodyweight squats + leg swings',
-      exercises: [
-        { name: 'Squat Machine', sets: '4 × 10-12', rest: '2 min', notes: 'Full depth. Brace your core. Start with manageable weight.' },
-        { name: 'Leg Press', sets: '4 × 12-15', rest: '90s', notes: 'Feet shoulder-width, don\'t lock knees at top.' },
-        { name: 'Leg Extension Machine', sets: '3 × 12-15', rest: '60s', notes: 'Pause & squeeze quads at top for 1 second.' },
-        { name: 'Seated Leg Curl Machine', sets: '3 × 12-15', rest: '60s', notes: 'Targets hamstrings. Control the negative.' },
-        { name: 'Calf Raises Machine', sets: '4 × 15-20', rest: '45s', notes: 'Full stretch at bottom, hard squeeze at top.' },
-      ],
-      finisher: '15 min incline treadmill walk (speed 5.5, incline 8-12%)',
-    },
-    {
-      day: 'Tuesday',
-      title: 'ACTIVE RECOVERY + CARDIO',
-      location: 'Home / Gym / Outdoor',
+      title: 'ACTIVE RECOVERY & FAT BURN',
+      location: 'Home / Outdoor / Gym',
       type: 'cardio' as const,
       color: '#ba1a1a',
       icon: 'directions_run',
-      warmup: 'Light stretching 5 min',
+      warmup: 'Light dynamic stretching',
       exercises: [
-        { name: 'Brisk Walking / Light Jogging', sets: '20-30 min', rest: '—', notes: 'Stay in fat burn zone (heart rate 120-140 BPM). Walk outdoors or treadmill.' },
-        { name: 'Plank Hold', sets: '3 × 30-60s', rest: '30s', notes: 'Keep body straight. Squeeze abs.' },
-        { name: 'Bicycle Crunches', sets: '3 × 20 each side', rest: '30s', notes: 'Slow & controlled, don\'t yank your neck.' },
-        { name: 'Leg Raises (lying)', sets: '3 × 15', rest: '30s', notes: 'Keep lower back pressed to floor.' },
-        { name: 'Full-body Stretching', sets: '10 min', rest: '—', notes: 'Hamstrings, hip flexors, chest, shoulders, back.' },
+        { name: 'Treadmill Incline Walk', sets: '25-30 min', rest: '—', notes: 'Or brisk outdoor walking. Keeps metabolism elevated without fatiguing muscles.' },
       ],
-      finisher: 'No extra finisher — prioritize recovery today',
+      finisher: '10 min full body stretching (hamstrings, hip flexors, chest)',
     },
     {
-      day: 'Wednesday',
-      title: 'UPPER BODY PUSH + PULL COMBO',
+      day: 'Tuesday',
+      title: 'UPPER BODY B — Upper Chest & Lat V-Taper',
       location: 'University Gym',
       type: 'strength' as const,
       color: '#4f46e5',
       icon: 'fitness_center',
-      warmup: '5 min treadmill + 15 push-ups + 10 band pull-aparts',
+      warmup: '5 min treadmill walk + arm circles',
       exercises: [
-        { name: 'Bench Press', sets: '3 × 8-10', rest: '90s', notes: 'Heavier than Saturday. Focus on strength.' },
-        { name: 'Lat Pulldown (close grip)', sets: '3 × 10-12', rest: '90s', notes: 'Close/neutral grip variation for inner back.' },
-        { name: 'Pec Fly Machine', sets: '3 × 12-15', rest: '60s', notes: 'Chest stretch & squeeze.' },
-        { name: 'Seated Row Machine', sets: '3 × 10-12', rest: '90s', notes: 'Focus on back squeeze.' },
-        { name: 'Dumbbell Shoulder Press', sets: '3 × 10-12', rest: '90s', notes: 'Go slightly heavier if comfortable.' },
-        { name: 'Dumbbell Bicep Curl', sets: '3 × 10-12', rest: '60s', notes: 'Alternating arms. No swing.' },
+        { name: 'Incline Bench Press', sets: '4 × 8-10', rest: '90s', notes: 'Hit upper chest first while fresh. Focus on progressive strength.' },
+        { name: 'Lat Pulldown', sets: '4 × 10-12', rest: '90s', notes: 'Neutral or wide grip. Drive elbows down to build back width.' },
+        { name: 'Bench Press', sets: '3 × 10-12', rest: '90s', notes: 'Flat press with moderate weight for volume.' },
+        { name: 'Seated Row Machine', sets: '3 × 10-12', rest: '75s', notes: 'Full back contraction. Strict form, no swinging.' },
+        { name: 'Pec Fly Machine', sets: '3 × 12-15', rest: '60s', notes: 'Isolate the chest and burn remaining glycogen.' },
       ],
-      finisher: '8 min battle rope intervals (20s on / 40s off) OR 10 min incline walk',
+      finisher: '12-15 min Treadmill Incline Walk (10-12% incline at 5.0 km/h)',
     },
     {
-      day: 'Thursday',
-      title: 'LEGS + CORE (Lower Body #2)',
+      day: 'Wednesday',
+      title: 'LOWER BODY B — Leg Hypertrophy & Metabolism',
       location: 'University Gym',
       type: 'strength' as const,
       color: '#0e7490',
       icon: 'fitness_center',
-      warmup: '5 min cycling + 15 bodyweight squats + hip circles',
+      warmup: '5 min cycling or treadmill walk',
       exercises: [
-        { name: 'Angle Leg Press', sets: '4 × 12-15', rest: '90s', notes: 'Wider stance to target inner thighs too.' },
-        { name: 'Squat Machine', sets: '3 × 10-12', rest: '2 min', notes: 'Moderate weight, perfect form priority.' },
-        { name: 'Leg Extension Machine', sets: '3 × 15', rest: '60s', notes: 'Drop set on last set: do 15, reduce weight 30%, do 12 more.' },
-        { name: 'Seated Leg Curl Machine', sets: '3 × 12', rest: '60s', notes: 'Slow negatives (3 seconds down).' },
-        { name: 'Calf Raises Machine', sets: '3 × 20', rest: '45s', notes: 'Pause 2 sec at top squeeze.' },
-        { name: 'Plank Hold', sets: '3 × 45-60s', rest: '30s', notes: 'Post-legs core work. Keep breathing.' },
+        { name: 'Leg Press', sets: '4 × 12-15', rest: '90s', notes: 'Slightly wider foot stance to engage adductors and glutes.' },
+        { name: 'Seated Leg Curl Machine', sets: '4 × 12-15', rest: '60s', notes: 'Higher rep hamstring burn.' },
+        { name: 'Leg Extension Machine', sets: '4 × 12-15', rest: '60s', notes: 'Burn out the quads. Full squeeze at the peak.' },
       ],
-      finisher: '15 min incline treadmill walk (fat burn focus)',
+      finisher: '15 min Treadmill Incline Walk (10-12% incline at 5.0 km/h)',
+    },
+    {
+      day: 'Thursday',
+      title: 'ACTIVE RECOVERY & CARDIO',
+      location: 'Home / Outdoor / Gym',
+      type: 'cardio' as const,
+      color: '#6b7280',
+      icon: 'directions_run',
+      warmup: 'Light stretching',
+      exercises: [
+        { name: 'Treadmill Incline Walk', sets: '25-30 min', rest: '—', notes: 'Light steady state walk. Drink plenty of water.' },
+      ],
+      finisher: 'Foam rolling or stretching at home',
     },
     {
       day: 'Friday',
-      title: 'REST DAY — Full Recovery',
+      title: 'REST DAY — Growth & Regeneration',
       location: 'Home',
       type: 'rest' as const,
-      color: '#6b7280',
+      color: '#475569',
       icon: 'self_improvement',
-      warmup: 'Optional light walk',
+      warmup: 'Optional gentle walk',
       exercises: [
-        { name: 'Full Rest or Light Walk', sets: '20-30 min', rest: '—', notes: 'Walking only. No gym. Let muscles recover and grow.' },
-        { name: 'Foam Rolling / Stretching', sets: '10-15 min', rest: '—', notes: 'Roll quads, hamstrings, back, and IT band. Stretch hip flexors.' },
-        { name: 'Meal Prep & Hydration Focus', sets: '—', rest: '—', notes: 'High protein meals. Drink 3L+ water. Sleep 8 hours tonight.' },
+        { name: 'Full Rest Day', sets: '—', rest: '—', notes: 'Muscles grow while resting. Prioritize 140-160g protein, 3L water, and 8 hours sleep.' },
       ],
-      finisher: 'Sleep early — growth happens during recovery!',
+      finisher: 'Rest up and get ready for Saturday\'s Upper A session!',
     },
   ];
 
@@ -359,34 +346,30 @@ export const Gym: React.FC = () => {
     }
   };
 
-  // 1-Click Starter Templates Loader — personalized PPL split for uni gym
+  // 1-Click Starter Templates Loader — Upper / Lower split exclusively with familiar exercises
   const handleLoadStarterTemplates = async () => {
     setErrorMsg('');
     const starters = [
-      { name: 'SAT — Push Day (Chest, Shoulders, Triceps)', exercises: [
-        'Bench Press', 'Incline Bench Press', 'Pec Fly Machine', 
-        'Dumbbell Shoulder Press', 'Dumbbell Lateral Raise', 'Dumbbell Tricep Kickback'
-      ]},
-      { name: 'SUN — Pull Day (Back, Biceps)', exercises: [
-        'Lat Pulldown', 'Seated Row Machine', 'Pull-ups / Chin-ups', 
-        'Back Roman Hyper Machine', 'Preacher Curl Machine', 'EZ Bar Curl'
-      ]},
-      { name: 'MON — Leg Day (Quads, Hamstrings, Calves)', exercises: [
-        'Squat Machine', 'Leg Press', 'Leg Extension Machine', 
-        'Seated Leg Curl Machine', 'Calf Raises Machine'
-      ]},
-      { name: 'WED — Upper Push+Pull Combo', exercises: [
-        'Bench Press', 'Lat Pulldown (close grip)', 'Pec Fly Machine', 
-        'Seated Row Machine', 'Dumbbell Shoulder Press', 'Dumbbell Bicep Curl'
-      ]},
-      { name: 'THU — Legs + Core #2', exercises: [
-        'Angle Leg Press', 'Squat Machine', 'Leg Extension Machine',
-        'Seated Leg Curl Machine', 'Calf Raises Machine', 'Plank Hold'
-      ]},
-      { name: 'TUE — Active Recovery + Cardio (Home/Gym)', exercises: [
-        'Brisk Walking / Light Jogging', 'Plank Hold', 'Bicycle Crunches',
-        'Leg Raises (lying)', 'Full-body Stretching'
-      ]},
+      {
+        name: 'Upper Body A (Chest & Back)',
+        exercises: ['Bench Press', 'Lat Pulldown', 'Incline Bench Press', 'Seated Row Machine', 'Pec Fly Machine', 'Treadmill Incline Walk']
+      },
+      {
+        name: 'Lower Body A (Quads & Hams)',
+        exercises: ['Leg Press', 'Leg Extension Machine', 'Seated Leg Curl Machine', 'Treadmill Incline Walk']
+      },
+      {
+        name: 'Upper Body B (Incline & Rows)',
+        exercises: ['Incline Bench Press', 'Lat Pulldown', 'Bench Press', 'Seated Row Machine', 'Pec Fly Machine', 'Treadmill Incline Walk']
+      },
+      {
+        name: 'Lower Body B (Leg Volume & Burn)',
+        exercises: ['Leg Press', 'Seated Leg Curl Machine', 'Leg Extension Machine', 'Treadmill Incline Walk']
+      },
+      {
+        name: 'Active Recovery & Incline Walk',
+        exercises: ['Treadmill Incline Walk']
+      },
     ];
 
     try {
@@ -400,7 +383,7 @@ export const Gym: React.FC = () => {
           body: JSON.stringify(starter)
         });
       }
-      setSaveSuccessMsg('Your personalized workout routine templates have been installed! 💪');
+      setSaveSuccessMsg('Your 4-Day Upper / Lower templates are installed! 🏋️');
       setTimeout(() => setSaveSuccessMsg(''), 5000);
       await fetchTemplatesAndLogs();
     } catch (err: any) {
